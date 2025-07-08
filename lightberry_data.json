@@ -1,0 +1,90 @@
+{
+  "Calculator": {
+    "history": [],
+    "memory": 0,
+    "advanced_mode": false
+  },
+  "Calendar": {
+    "events": {}
+  },
+  "Notes": {
+    "notes": []
+  },
+  "World Clock": {
+    "world_clocks": [
+      {
+        "name": "Madrid",
+        "timezone": 1,
+        "color": [
+          255,
+          100,
+          100
+        ]
+      },
+      {
+        "name": "New York",
+        "timezone": -5,
+        "color": [
+          100,
+          255,
+          100
+        ]
+      },
+      {
+        "name": "Tokyo",
+        "timezone": 9,
+        "color": [
+          100,
+          100,
+          255
+        ]
+      }
+    ]
+  },
+  "Weather": {
+    "locations": [
+      "Madrid",
+      "New York",
+      "Tokyo"
+    ],
+    "unit": "celsius",
+    "weather_data": {}
+  },
+  "Timer": {
+    "mode": "stopwatch",
+    "countdown_hours": 0,
+    "countdown_minutes": 5,
+    "countdown_seconds": 0
+  },
+  "Terminal": {
+    "command_history": [],
+    "current_dir": "/home/runner/workspace"
+  },
+  "Converter": {
+    "current_category": "Length",
+    "from_unit_index": 0,
+    "to_unit_index": 1
+  },
+  "Mail": {
+    "current_account_index": 0
+  },
+  "System Info": {
+    "refresh_interval": 5
+  },
+  "Settings": {
+    "mail_accounts": [],
+    "system_settings": {
+      "auto_brightness": true,
+      "screen_timeout": 30,
+      "volume": 50,
+      "notification_sound": true,
+      "auto_update": true,
+      "debug_mode": false
+    },
+    "bluetooth_enabled": false
+  },
+  "Quit": {
+    "last_action": null
+  },
+  "last_saved": "2025-07-08T21:06:27.305093"
+}

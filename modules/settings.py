@@ -1,0 +1,814 @@
+"""
+Enhanced Settings Module for LightBerry OS
+Professional settings with WiFi, Bluetooth, and account management
+"""
+
+import pygame
+import threading
+import time
+from config.constants import *
+
+class Settings:
+    def __init__(self, os_instance):
+        self.os = os_instance
+        self.init_settings()
+    
+    def init_settings(self):
+        """Initialize settings state"""
+        self.settings_categories = [
+            "WiFi", "Bluetooth", "Display", "Sound", "Mail Accounts", 
+            "System", "About"
+        ]
+        
+        self.selected_category = 0
+        self.selected_item = 0
+        self.mode = "categories"  # "categories", "wifi", "bluetooth", "mail", "system"
+        self.scroll_offset = 0
+        
+        # WiFi settings
+        self.wifi_networks = []
+        self.wifi_scanning = False
+        self.wifi_selected = 0
+        self.wifi_password = ""
+        self.wifi_input_mode = False
+        self.wifi_connection_status = "Disconnected"
+        
+        # Bluetooth settings
+        self.bluetooth_devices = []
+        self.bluetooth_scanning = False
+        self.bluetooth_selected = 0
+        self.bluetooth_enabled = False
+        self.bluetooth_connection_status = "Disabled"
+        
+        # Mail accounts
+        self.mail_accounts = []
+        self.mail_editing_account = None
+        self.mail_input_mode = False
+        self.mail_input_field = "name"
+        self.mail_input_fields = ["name", "email", "password", "imap_server", "imap_port", "smtp_server", "smtp_port"]
+        self.mail_field_index = 0
+        self.mail_temp_account = {}
+        
+        # System settings
+        self.system_settings = {
+            "auto_brightness": True,
+            "screen_timeout": 30,
+            "volume": 50,
+            "notification_sound": True,
+            "auto_update": True,
+            "debug_mode": False
+        }
+        
+        # Text input
+        self.text_cursor_visible = True
+        self.text_cursor_timer = 0
+        
+        # Load existing settings
+        self.load_settings()
+    
+    def load_settings(self):
+        """Load settings from data manager"""
+        try:
+            data = self.os.data_manager.get_module_data("Settings")
+            self.mail_accounts = data.get("mail_accounts", [])
+            self.system_settings.update(data.get("system_settings", {}))
+            self.bluetooth_enabled = data.get("bluetooth_enabled", False)
+        except Exception as e:
+            print(f"Error loading settings: {e}")
+    
+    def save_settings(self):
+        """Save settings to data manager"""
+        try:
+            data = {
+                "mail_accounts": self.mail_accounts,
+                "system_settings": self.system_settings,
+                "bluetooth_enabled": self.bluetooth_enabled
+            }
+            self.os.data_manager.set_module_data("Settings", data)
+        except Exception as e:
+            print(f"Error saving settings: {e}")
+    
+    def handle_events(self, event):
+        """Handle settings events"""
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                if self.mode == "categories":
+                    return "back"
+                elif self.wifi_input_mode:
+                    self.wifi_input_mode = False
+                    self.wifi_password = ""
+                elif self.mail_input_mode:
+                    self.cancel_mail_edit()
+                else:
+                    self.mode = "categories"
+                    self.selected_item = 0
+                    self.scroll_offset = 0
+            
+            elif self.mode == "categories":
+                self.handle_category_events(event)
+            
+            elif self.mode == "wifi":
+                self.handle_wifi_events(event)
+            
+            elif self.mode == "bluetooth":
+                self.handle_bluetooth_events(event)
+            
+            elif self.mode == "mail":
+                self.handle_mail_events(event)
+            
+            elif self.mode == "system":
+                self.handle_system_events(event)
+        
+        return None
+    
+    def handle_category_events(self, event):
+        """Handle category selection events"""
+        if event.key == pygame.K_UP:
+            self.selected_category = max(0, self.selected_category - 1)
+        
+        elif event.key == pygame.K_DOWN:
+            self.selected_category = min(len(self.settings_categories) - 1, self.selected_category + 1)
+        
+        elif event.key == pygame.K_RETURN:
+            category = self.settings_categories[self.selected_category]
+            if category == "WiFi":
+                self.mode = "wifi"
+                self.selected_item = 0
+                self.start_wifi_scan()
+            elif category == "Bluetooth":
+                self.mode = "bluetooth"
+                self.selected_item = 0
+                self.bluetooth_enabled = self.os.hardware_manager.enable_bluetooth()
+            elif category == "Mail Accounts":
+                self.mode = "mail"
+                self.selected_item = 0
+            elif category == "System":
+                self.mode = "system"
+                self.selected_item = 0
+    
+    def handle_wifi_events(self, event):
+        """Handle WiFi settings events"""
+        if self.wifi_input_mode:
+            if event.key == pygame.K_RETURN:
+                self.connect_to_wifi()
+            elif event.key == pygame.K_BACKSPACE:
+                self.wifi_password = self.wifi_password[:-1]
+            else:
+                char = event.unicode
+                if char.isprintable() and len(self.wifi_password) < 50:
+                    self.wifi_password += char
+        else:
+            if event.key == pygame.K_UP:
+                self.wifi_selected = max(0, self.wifi_selected - 1)
+            
+            elif event.key == pygame.K_DOWN:
+                self.wifi_selected = min(len(self.wifi_networks) - 1, self.wifi_selected + 1)
+            
+            elif event.key == pygame.K_RETURN:
+                if self.wifi_networks and self.wifi_selected < len(self.wifi_networks):
+                    network = self.wifi_networks[self.wifi_selected]
+                    if network.get("encrypted", False):
+                        self.wifi_input_mode = True
+                        self.wifi_password = ""
+                    else:
+                        self.connect_to_wifi()
+            
+            elif event.key == pygame.K_r:
+                self.start_wifi_scan()
+            
+            elif event.key == pygame.K_d:
+                self.disconnect_wifi()
+    
+    def handle_bluetooth_events(self, event):
+        """Handle Bluetooth settings events"""
+        if event.key == pygame.K_UP:
+            self.bluetooth_selected = max(0, self.bluetooth_selected - 1)
+        
+        elif event.key == pygame.K_DOWN:
+            self.bluetooth_selected = min(len(self.bluetooth_devices) - 1, self.bluetooth_selected + 1)
+        
+        elif event.key == pygame.K_RETURN:
+            if self.bluetooth_devices and self.bluetooth_selected < len(self.bluetooth_devices):
+                device = self.bluetooth_devices[self.bluetooth_selected]
+                self.connect_bluetooth_device(device["address"])
+        
+        elif event.key == pygame.K_r:
+            if self.bluetooth_enabled:
+                self.start_bluetooth_scan()
+        
+        elif event.key == pygame.K_t:
+            self.bluetooth_enabled = not self.bluetooth_enabled
+            if self.bluetooth_enabled:
+                self.os.hardware_manager.enable_bluetooth()
+            else:
+                self.os.hardware_manager.disable_bluetooth()
+    
+    def handle_mail_events(self, event):
+        """Handle mail account events"""
+        if self.mail_input_mode:
+            if event.key == pygame.K_TAB:
+                self.mail_field_index = (self.mail_field_index + 1) % len(self.mail_input_fields)
+                self.mail_input_field = self.mail_input_fields[self.mail_field_index]
+            
+            elif event.key == pygame.K_UP:
+                self.mail_field_index = max(0, self.mail_field_index - 1)
+                self.mail_input_field = self.mail_input_fields[self.mail_field_index]
+            
+            elif event.key == pygame.K_DOWN:
+                self.mail_field_index = min(len(self.mail_input_fields) - 1, self.mail_field_index + 1)
+                self.mail_input_field = self.mail_input_fields[self.mail_field_index]
+            
+            elif event.key == pygame.K_RETURN:
+                self.save_mail_account()
+            
+            elif event.key == pygame.K_BACKSPACE:
+                current_value = self.mail_temp_account.get(self.mail_input_field, "")
+                self.mail_temp_account[self.mail_input_field] = current_value[:-1]
+            
+            else:
+                char = event.unicode
+                if char.isprintable():
+                    current_value = self.mail_temp_account.get(self.mail_input_field, "")
+                    if len(current_value) < 100:
+                        self.mail_temp_account[self.mail_input_field] = current_value + char
+        else:
+            if event.key == pygame.K_UP:
+                self.selected_item = max(0, self.selected_item - 1)
+            
+            elif event.key == pygame.K_DOWN:
+                self.selected_item = min(len(self.mail_accounts), self.selected_item + 1)
+            
+            elif event.key == pygame.K_RETURN:
+                if self.selected_item < len(self.mail_accounts):
+                    self.edit_mail_account(self.selected_item)
+                else:
+                    self.add_mail_account()
+            
+            elif event.key == pygame.K_a:
+                self.add_mail_account()
+            
+            elif event.key == pygame.K_d:
+                if self.selected_item < len(self.mail_accounts):
+                    del self.mail_accounts[self.selected_item]
+                    self.selected_item = min(self.selected_item, len(self.mail_accounts) - 1)
+                    self.save_settings()
+    
+    def handle_system_events(self, event):
+        """Handle system settings events"""
+        if event.key == pygame.K_UP:
+            self.selected_item = max(0, self.selected_item - 1)
+        
+        elif event.key == pygame.K_DOWN:
+            system_items = list(self.system_settings.keys())
+            self.selected_item = min(len(system_items) - 1, self.selected_item + 1)
+        
+        elif event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
+            self.toggle_system_setting()
+        
+        elif event.key == pygame.K_LEFT:
+            self.adjust_system_setting(-1)
+        
+        elif event.key == pygame.K_RIGHT:
+            self.adjust_system_setting(1)
+    
+    def start_wifi_scan(self):
+        """Start WiFi network scan"""
+        if not self.wifi_scanning:
+            self.wifi_scanning = True
+            self.wifi_networks = []
+            
+            def scan_thread():
+                try:
+                    networks = self.os.hardware_manager.scan_wifi_networks()
+                    self.wifi_networks = networks
+                    self.wifi_connection_status = "Scan complete"
+                except Exception as e:
+                    self.wifi_connection_status = f"Scan failed: {e}"
+                finally:
+                    self.wifi_scanning = False
+            
+            thread = threading.Thread(target=scan_thread)
+            thread.daemon = True
+            thread.start()
+    
+    def connect_to_wifi(self):
+        """Connect to selected WiFi network"""
+        if self.wifi_networks and self.wifi_selected < len(self.wifi_networks):
+            network = self.wifi_networks[self.wifi_selected]
+            ssid = network["name"]
+            password = self.wifi_password
+            
+            def connect_thread():
+                try:
+                    success = self.os.hardware_manager.connect_wifi(ssid, password)
+                    if success:
+                        self.wifi_connection_status = f"Connected to {ssid}"
+                    else:
+                        self.wifi_connection_status = f"Failed to connect to {ssid}"
+                except Exception as e:
+                    self.wifi_connection_status = f"Connection error: {e}"
+                finally:
+                    self.wifi_input_mode = False
+                    self.wifi_password = ""
+            
+            thread = threading.Thread(target=connect_thread)
+            thread.daemon = True
+            thread.start()
+    
+    def disconnect_wifi(self):
+        """Disconnect from WiFi"""
+        try:
+            self.os.hardware_manager.disconnect_wifi()
+            self.wifi_connection_status = "Disconnected"
+        except Exception as e:
+            self.wifi_connection_status = f"Disconnect failed: {e}"
+    
+    def start_bluetooth_scan(self):
+        """Start Bluetooth device scan"""
+        if not self.bluetooth_scanning and self.bluetooth_enabled:
+            self.bluetooth_scanning = True
+            self.bluetooth_devices = []
+            
+            def scan_thread():
+                try:
+                    devices = self.os.hardware_manager.scan_bluetooth_devices()
+                    self.bluetooth_devices = devices
+                    self.bluetooth_connection_status = "Scan complete"
+                except Exception as e:
+                    self.bluetooth_connection_status = f"Scan failed: {e}"
+                finally:
+                    self.bluetooth_scanning = False
+            
+            thread = threading.Thread(target=scan_thread)
+            thread.daemon = True
+            thread.start()
+    
+    def connect_bluetooth_device(self, address):
+        """Connect to Bluetooth device"""
+        def connect_thread():
+            try:
+                success = self.os.hardware_manager.connect_bluetooth_device(address)
+                if success:
+                    self.bluetooth_connection_status = f"Connected to {address}"
+                else:
+                    self.bluetooth_connection_status = f"Failed to connect to {address}"
+            except Exception as e:
+                self.bluetooth_connection_status = f"Connection error: {e}"
+        
+        thread = threading.Thread(target=connect_thread)
+        thread.daemon = True
+        thread.start()
+    
+    def add_mail_account(self):
+        """Add new mail account"""
+        self.mail_input_mode = True
+        self.mail_editing_account = None
+        self.mail_field_index = 0
+        self.mail_input_field = self.mail_input_fields[0]
+        self.mail_temp_account = {
+            "name": "",
+            "email": "",
+            "password": "",
+            "imap_server": "",
+            "imap_port": "993",
+            "smtp_server": "",
+            "smtp_port": "587",
+            "use_ssl": True
+        }
+    
+    def edit_mail_account(self, index):
+        """Edit existing mail account"""
+        if index < len(self.mail_accounts):
+            self.mail_input_mode = True
+            self.mail_editing_account = index
+            self.mail_field_index = 0
+            self.mail_input_field = self.mail_input_fields[0]
+            self.mail_temp_account = self.mail_accounts[index].copy()
+    
+    def save_mail_account(self):
+        """Save mail account"""
+        if self.mail_temp_account.get("name") and self.mail_temp_account.get("email"):
+            if self.mail_editing_account is not None:
+                self.mail_accounts[self.mail_editing_account] = self.mail_temp_account.copy()
+            else:
+                self.mail_accounts.append(self.mail_temp_account.copy())
+            
+            self.save_settings()
+            self.cancel_mail_edit()
+    
+    def cancel_mail_edit(self):
+        """Cancel mail account editing"""
+        self.mail_input_mode = False
+        self.mail_editing_account = None
+        self.mail_temp_account = {}
+        self.mail_field_index = 0
+    
+    def toggle_system_setting(self):
+        """Toggle boolean system setting"""
+        settings_keys = list(self.system_settings.keys())
+        if self.selected_item < len(settings_keys):
+            key = settings_keys[self.selected_item]
+            value = self.system_settings[key]
+            
+            if isinstance(value, bool):
+                self.system_settings[key] = not value
+                self.save_settings()
+    
+    def adjust_system_setting(self, direction):
+        """Adjust numeric system setting"""
+        settings_keys = list(self.system_settings.keys())
+        if self.selected_item < len(settings_keys):
+            key = settings_keys[self.selected_item]
+            value = self.system_settings[key]
+            
+            if isinstance(value, int):
+                if key == "screen_timeout":
+                    self.system_settings[key] = max(5, min(300, value + direction * 5))
+                elif key == "volume":
+                    self.system_settings[key] = max(0, min(100, value + direction * 5))
+                
+                self.save_settings()
+    
+    def update(self):
+        """Update settings state"""
+        # Update text cursor
+        self.text_cursor_timer += 1
+        if self.text_cursor_timer >= 30:
+            self.text_cursor_visible = not self.text_cursor_visible
+            self.text_cursor_timer = 0
+    
+    def draw(self, screen):
+        """Draw settings interface"""
+        if self.mode == "categories":
+            self.draw_categories(screen)
+        elif self.mode == "wifi":
+            self.draw_wifi_settings(screen)
+        elif self.mode == "bluetooth":
+            self.draw_bluetooth_settings(screen)
+        elif self.mode == "mail":
+            self.draw_mail_settings(screen)
+        elif self.mode == "system":
+            self.draw_system_settings(screen)
+    
+    def draw_categories(self, screen):
+        """Draw settings categories"""
+        # Header
+        header_text = "Settings"
+        header_surface = self.os.font_l.render(header_text, True, ACCENT_COLOR)
+        header_x = SCREEN_WIDTH // 2 - header_surface.get_width() // 2
+        screen.blit(header_surface, (header_x, 5))
+        
+        # Categories
+        start_y = 40
+        for i, category in enumerate(self.settings_categories):
+            y_pos = start_y + i * 25
+            
+            # Selection background
+            if i == self.selected_category:
+                cat_rect = pygame.Rect(10, y_pos - 2, SCREEN_WIDTH - 20, 22)
+                pygame.draw.rect(screen, SELECTED_COLOR, cat_rect)
+                pygame.draw.rect(screen, ACCENT_COLOR, cat_rect, 2)
+            
+            # Category text
+            cat_surface = self.os.font_m.render(category, True, TEXT_COLOR)
+            screen.blit(cat_surface, (20, y_pos))
+            
+            # Status indicator
+            status_color = SUCCESS_COLOR
+            if category == "WiFi":
+                status_color = SUCCESS_COLOR if self.wifi_connection_status == "Connected" else ERROR_COLOR
+            elif category == "Bluetooth":
+                status_color = SUCCESS_COLOR if self.bluetooth_enabled else ERROR_COLOR
+            elif category == "Mail Accounts":
+                status_color = SUCCESS_COLOR if self.mail_accounts else WARNING_COLOR
+            
+            pygame.draw.circle(screen, status_color, (SCREEN_WIDTH - 20, y_pos + 10), 4)
+        
+        # Controls
+        controls = [
+            "↑↓: Navigate",
+            "Enter: Select",
+            "ESC: Back"
+        ]
+        
+        control_y = SCREEN_HEIGHT - 30
+        for i, control in enumerate(controls):
+            control_surface = self.os.font_tiny.render(control, True, HIGHLIGHT_COLOR)
+            control_x = 10 + i * 120
+            screen.blit(control_surface, (control_x, control_y))
+    
+    def draw_wifi_settings(self, screen):
+        """Draw WiFi settings"""
+        # Header
+        header_text = "WiFi Settings"
+        header_surface = self.os.font_l.render(header_text, True, ACCENT_COLOR)
+        header_x = SCREEN_WIDTH // 2 - header_surface.get_width() // 2
+        screen.blit(header_surface, (header_x, 5))
+        
+        # Status
+        status_surface = self.os.font_m.render(self.wifi_connection_status, True, 
+                                             SUCCESS_COLOR if "Connected" in self.wifi_connection_status else HIGHLIGHT_COLOR)
+        screen.blit(status_surface, (10, 30))
+        
+        # Networks
+        if self.wifi_scanning:
+            scan_text = "Scanning for networks..."
+            scan_surface = self.os.font_m.render(scan_text, True, WARNING_COLOR)
+            screen.blit(scan_surface, (10, 55))
+        elif not self.wifi_networks:
+            no_networks_text = "No networks found"
+            no_networks_surface = self.os.font_m.render(no_networks_text, True, ERROR_COLOR)
+            screen.blit(no_networks_surface, (10, 55))
+        else:
+            # Network list
+            for i, network in enumerate(self.wifi_networks[:6]):  # Show max 6 networks
+                y_pos = 55 + i * 25
+                
+                # Selection background
+                if i == self.wifi_selected:
+                    net_rect = pygame.Rect(10, y_pos - 2, SCREEN_WIDTH - 20, 22)
+                    pygame.draw.rect(screen, SELECTED_COLOR, net_rect)
+                
+                # Network name
+                net_surface = self.os.font_m.render(network["name"], True, TEXT_COLOR)
+                screen.blit(net_surface, (15, y_pos))
+                
+                # Security indicator
+                if network.get("encrypted", False):
+                    lock_surface = self.os.font_s.render("🔒", True, WARNING_COLOR)
+                    screen.blit(lock_surface, (SCREEN_WIDTH - 40, y_pos))
+                
+                # Signal strength
+                quality = network.get("quality", "0/0")
+                quality_surface = self.os.font_s.render(quality, True, HIGHLIGHT_COLOR)
+                screen.blit(quality_surface, (SCREEN_WIDTH - 80, y_pos + 5))
+        
+        # Password input
+        if self.wifi_input_mode:
+            input_y = SCREEN_HEIGHT - 80
+            input_label = "Password:"
+            input_surface = self.os.font_m.render(input_label, True, TEXT_COLOR)
+            screen.blit(input_surface, (10, input_y))
+            
+            input_rect = pygame.Rect(10, input_y + 20, SCREEN_WIDTH - 20, 25)
+            pygame.draw.rect(screen, BUTTON_COLOR, input_rect)
+            pygame.draw.rect(screen, BUTTON_BORDER_COLOR, input_rect, 2)
+            
+            password_display = "*" * len(self.wifi_password)
+            if self.text_cursor_visible:
+                password_display += "|"
+            
+            password_surface = self.os.font_m.render(password_display, True, TEXT_COLOR)
+            screen.blit(password_surface, (15, input_y + 23))
+        
+        # Controls
+        controls = [
+            "↑↓: Navigate",
+            "Enter: Connect",
+            "R: Refresh",
+            "D: Disconnect",
+            "ESC: Back"
+        ]
+        
+        control_y = SCREEN_HEIGHT - 40
+        for i, control in enumerate(controls):
+            control_surface = self.os.font_tiny.render(control, True, HIGHLIGHT_COLOR)
+            control_x = 10 + (i % 3) * 125
+            control_y_pos = control_y + (i // 3) * 12
+            screen.blit(control_surface, (control_x, control_y_pos))
+    
+    def draw_bluetooth_settings(self, screen):
+        """Draw Bluetooth settings"""
+        # Header
+        header_text = "Bluetooth Settings"
+        header_surface = self.os.font_l.render(header_text, True, ACCENT_COLOR)
+        header_x = SCREEN_WIDTH // 2 - header_surface.get_width() // 2
+        screen.blit(header_surface, (header_x, 5))
+        
+        # Status
+        status_text = "Enabled" if self.bluetooth_enabled else "Disabled"
+        status_color = SUCCESS_COLOR if self.bluetooth_enabled else ERROR_COLOR
+        status_surface = self.os.font_m.render(status_text, True, status_color)
+        screen.blit(status_surface, (10, 30))
+        
+        # Connection status
+        if self.bluetooth_connection_status:
+            conn_surface = self.os.font_s.render(self.bluetooth_connection_status, True, HIGHLIGHT_COLOR)
+            screen.blit(conn_surface, (10, 50))
+        
+        # Devices
+        if not self.bluetooth_enabled:
+            disabled_text = "Bluetooth is disabled"
+            disabled_surface = self.os.font_m.render(disabled_text, True, WARNING_COLOR)
+            screen.blit(disabled_surface, (10, 80))
+        elif self.bluetooth_scanning:
+            scan_text = "Scanning for devices..."
+            scan_surface = self.os.font_m.render(scan_text, True, WARNING_COLOR)
+            screen.blit(scan_surface, (10, 80))
+        elif not self.bluetooth_devices:
+            no_devices_text = "No devices found"
+            no_devices_surface = self.os.font_m.render(no_devices_text, True, ERROR_COLOR)
+            screen.blit(no_devices_surface, (10, 80))
+        else:
+            # Device list
+            for i, device in enumerate(self.bluetooth_devices[:5]):  # Show max 5 devices
+                y_pos = 80 + i * 25
+                
+                # Selection background
+                if i == self.bluetooth_selected:
+                    dev_rect = pygame.Rect(10, y_pos - 2, SCREEN_WIDTH - 20, 22)
+                    pygame.draw.rect(screen, SELECTED_COLOR, dev_rect)
+                
+                # Device name
+                dev_surface = self.os.font_m.render(device["name"], True, TEXT_COLOR)
+                screen.blit(dev_surface, (15, y_pos))
+                
+                # Device address
+                addr_surface = self.os.font_s.render(device["address"], True, HIGHLIGHT_COLOR)
+                screen.blit(addr_surface, (15, y_pos + 12))
+        
+        # Controls
+        controls = [
+            "↑↓: Navigate",
+            "Enter: Connect",
+            "R: Scan",
+            "T: Toggle BT",
+            "ESC: Back"
+        ]
+        
+        control_y = SCREEN_HEIGHT - 30
+        for i, control in enumerate(controls):
+            control_surface = self.os.font_tiny.render(control, True, HIGHLIGHT_COLOR)
+            control_x = 10 + (i % 3) * 125
+            control_y_pos = control_y + (i // 3) * 12
+            screen.blit(control_surface, (control_x, control_y_pos))
+    
+    def draw_mail_settings(self, screen):
+        """Draw mail account settings"""
+        # Header
+        header_text = "Mail Accounts"
+        header_surface = self.os.font_l.render(header_text, True, ACCENT_COLOR)
+        header_x = SCREEN_WIDTH // 2 - header_surface.get_width() // 2
+        screen.blit(header_surface, (header_x, 5))
+        
+        if self.mail_input_mode:
+            # Account editing mode
+            edit_title = "Edit Account" if self.mail_editing_account is not None else "Add Account"
+            edit_surface = self.os.font_m.render(edit_title, True, ACCENT_COLOR)
+            screen.blit(edit_surface, (10, 30))
+            
+            # Input fields
+            y_offset = 55
+            for i, field in enumerate(self.mail_input_fields):
+                field_y = y_offset + i * 25
+                
+                # Field label
+                field_label = field.replace("_", " ").title() + ":"
+                label_surface = self.os.font_s.render(field_label, True, TEXT_COLOR)
+                screen.blit(label_surface, (10, field_y))
+                
+                # Input field
+                field_rect = pygame.Rect(80, field_y, SCREEN_WIDTH - 90, 20)
+                field_color = SELECTED_COLOR if i == self.mail_field_index else BUTTON_COLOR
+                pygame.draw.rect(screen, field_color, field_rect)
+                pygame.draw.rect(screen, BUTTON_BORDER_COLOR, field_rect, 2)
+                
+                # Field value
+                field_value = str(self.mail_temp_account.get(field, ""))
+                if field == "password" and field_value:
+                    field_value = "*" * len(field_value)
+                
+                if i == self.mail_field_index and self.text_cursor_visible:
+                    field_value += "|"
+                
+                if len(field_value) > 30:
+                    field_value = field_value[:30] + "..."
+                
+                value_surface = self.os.font_s.render(field_value, True, TEXT_COLOR)
+                screen.blit(value_surface, (85, field_y + 2))
+        else:
+            # Account list mode
+            if not self.mail_accounts:
+                no_accounts_text = "No mail accounts configured"
+                no_accounts_surface = self.os.font_m.render(no_accounts_text, True, WARNING_COLOR)
+                screen.blit(no_accounts_surface, (10, 60))
+            else:
+                # Account list
+                for i, account in enumerate(self.mail_accounts):
+                    y_pos = 55 + i * 30
+                    
+                    # Selection background
+                    if i == self.selected_item:
+                        acc_rect = pygame.Rect(10, y_pos - 2, SCREEN_WIDTH - 20, 28)
+                        pygame.draw.rect(screen, SELECTED_COLOR, acc_rect)
+                    
+                    # Account name
+                    name_surface = self.os.font_m.render(account.get("name", "Unnamed"), True, TEXT_COLOR)
+                    screen.blit(name_surface, (15, y_pos))
+                    
+                    # Account email
+                    email_surface = self.os.font_s.render(account.get("email", ""), True, HIGHLIGHT_COLOR)
+                    screen.blit(email_surface, (15, y_pos + 15))
+            
+            # Add new account option
+            add_y = 55 + len(self.mail_accounts) * 30
+            if self.selected_item == len(self.mail_accounts):
+                add_rect = pygame.Rect(10, add_y - 2, SCREEN_WIDTH - 20, 22)
+                pygame.draw.rect(screen, SELECTED_COLOR, add_rect)
+            
+            add_surface = self.os.font_m.render("+ Add New Account", True, SUCCESS_COLOR)
+            screen.blit(add_surface, (15, add_y))
+        
+        # Controls
+        if self.mail_input_mode:
+            controls = [
+                "Tab/↑↓: Navigate fields",
+                "Enter: Save",
+                "ESC: Cancel"
+            ]
+        else:
+            controls = [
+                "↑↓: Navigate",
+                "Enter: Edit/Add",
+                "A: Add account",
+                "D: Delete",
+                "ESC: Back"
+            ]
+        
+        control_y = SCREEN_HEIGHT - 30
+        for i, control in enumerate(controls):
+            control_surface = self.os.font_tiny.render(control, True, HIGHLIGHT_COLOR)
+            control_x = 10 + (i % 2) * 180
+            control_y_pos = control_y + (i // 2) * 12
+            screen.blit(control_surface, (control_x, control_y_pos))
+    
+    def draw_system_settings(self, screen):
+        """Draw system settings"""
+        # Header
+        header_text = "System Settings"
+        header_surface = self.os.font_l.render(header_text, True, ACCENT_COLOR)
+        header_x = SCREEN_WIDTH // 2 - header_surface.get_width() // 2
+        screen.blit(header_surface, (header_x, 5))
+        
+        # Settings list
+        settings_items = [
+            ("Auto Brightness", self.system_settings["auto_brightness"]),
+            ("Screen Timeout", f"{self.system_settings['screen_timeout']}s"),
+            ("Volume", f"{self.system_settings['volume']}%"),
+            ("Notification Sound", self.system_settings["notification_sound"]),
+            ("Auto Update", self.system_settings["auto_update"]),
+            ("Debug Mode", self.system_settings["debug_mode"])
+        ]
+        
+        for i, (label, value) in enumerate(settings_items):
+            y_pos = 40 + i * 30
+            
+            # Selection background
+            if i == self.selected_item:
+                setting_rect = pygame.Rect(10, y_pos - 2, SCREEN_WIDTH - 20, 26)
+                pygame.draw.rect(screen, SELECTED_COLOR, setting_rect)
+            
+            # Setting label
+            label_surface = self.os.font_m.render(label, True, TEXT_COLOR)
+            screen.blit(label_surface, (15, y_pos))
+            
+            # Setting value
+            if isinstance(value, bool):
+                value_text = "On" if value else "Off"
+                value_color = SUCCESS_COLOR if value else ERROR_COLOR
+            else:
+                value_text = str(value)
+                value_color = TEXT_COLOR
+            
+            value_surface = self.os.font_m.render(value_text, True, value_color)
+            value_x = SCREEN_WIDTH - value_surface.get_width() - 15
+            screen.blit(value_surface, (value_x, y_pos))
+        
+        # Controls
+        controls = [
+            "↑↓: Navigate",
+            "Enter/Space: Toggle",
+            "←→: Adjust",
+            "ESC: Back"
+        ]
+        
+        control_y = SCREEN_HEIGHT - 30
+        for i, control in enumerate(controls):
+            control_surface = self.os.font_tiny.render(control, True, HIGHLIGHT_COLOR)
+            control_x = 10 + (i % 2) * 180
+            control_y_pos = control_y + (i // 2) * 12
+            screen.blit(control_surface, (control_x, control_y_pos))
+    
+    def save_data(self):
+        """Save settings data"""
+        return {
+            "mail_accounts": self.mail_accounts,
+            "system_settings": self.system_settings,
+            "bluetooth_enabled": self.bluetooth_enabled
+        }
+    
+    def load_data(self, data):
+        """Load settings data"""
+        self.mail_accounts = data.get("mail_accounts", [])
+        self.system_settings.update(data.get("system_settings", {}))
+        self.bluetooth_enabled = data.get("bluetooth_enabled", False)
