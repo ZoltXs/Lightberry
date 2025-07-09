@@ -23,7 +23,8 @@ set -e
 
 # --- Variables ---
 APP_DIR="$HOME/lightberry-os1"
-APP_DIR="$HOME/lightberry-os1/modules"
+APP_DIR1="$HOME/lightberry-os1/modules"
+APP_DIR2="$HOME/lightberry-os1/utils"
 OPENBOX_DIR="$HOME/.config/openbox"
 BASH_PROFILE="$HOME/.bash_profile"
 
