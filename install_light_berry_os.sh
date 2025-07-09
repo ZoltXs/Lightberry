@@ -93,7 +93,7 @@ sleep 2
 
 # Cambiar al directorio de la aplicación y ejecutar
 cd "$APP_DIR"
-python3 light_phone_os.py > app.log 2>&1 &
+python3 lightberry_os.py > app.log 2>&1 &
 EOF
 chmod +x "$OPENBOX_DIR/autostart"
 print_status "Autostart de Openbox configurado."
