@@ -22,7 +22,7 @@ print_info() { echo -e "$BLUE🔍 $NC $1"; }
 set -e
 
 # --- Variables ---
-APP_DIR="$HOME/lightberry-os"
+APP_DIR="$HOME/lightberry-os1"
 OPENBOX_DIR="$HOME/.config/openbox"
 BASH_PROFILE="$HOME/.bash_profile"
 
