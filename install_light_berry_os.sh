@@ -45,7 +45,7 @@ mkdir -p "$APP_DIR"
 print_status "Directorio de aplicación creado."
 
 print_info "-> 3. Copiando archivos de aplicación..."
-cp "$(dirname "$0")/light_phone_os.py" "$APP_DIR/"
+cp "$(dirname "$0")/lightberry_os.py" "$APP_DIR/"
 cp "$(dirname "$0")/light_phone_kiosk.py" "$APP_DIR/"
 cp "$(dirname "$0")/utils/data_manager.py" "$APP_DIR/"
 cp "$(dirname "$0")/utils/hardware_manager.py" "$APP_DIR/"
