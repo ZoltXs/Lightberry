@@ -1,12 +1,33 @@
 """
 Enhanced Settings Module for LightBerry OS
 Professional settings with WiFi, Bluetooth, and account management
+Fixed black screen issues and improved functionality
 """
 
 import pygame
 import threading
 import time
-from config.constants import *
+import sys
+import os
+
+# Add the parent directory to the path to find config module
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    from config.constants import *
+except ImportError:
+    # Fallback constants if import fails
+    SCREEN_WIDTH = 400
+    SCREEN_HEIGHT = 240
+    ACCENT_COLOR = (0, 150, 255)
+    TEXT_COLOR = (255, 255, 255)
+    SELECTED_COLOR = (50, 50, 50)
+    BUTTON_COLOR = (30, 30, 30)
+    BUTTON_BORDER_COLOR = (100, 100, 100)
+    SUCCESS_COLOR = (0, 255, 0)
+    ERROR_COLOR = (255, 0, 0)
+    WARNING_COLOR = (255, 255, 0)
+    HIGHLIGHT_COLOR = (200, 200, 200)
 
 class Settings:
     def __init__(self, os_instance):
@@ -31,7 +52,8 @@ class Settings:
         self.wifi_selected = 0
         self.wifi_password = ""
         self.wifi_input_mode = False
-        self.wifi_connection_status = "Disconnected"
+        self.wifi_connection_status = "Ready"
+        self.wifi_current_network = None
         
         # Bluetooth settings
         self.bluetooth_devices = []
@@ -65,61 +87,91 @@ class Settings:
         
         # Load existing settings
         self.load_settings()
+        
+        # Check current WiFi status
+        self.check_wifi_status()
     
     def load_settings(self):
         """Load settings from data manager"""
         try:
-            data = self.os.data_manager.get_module_data("Settings")
-            self.mail_accounts = data.get("mail_accounts", [])
-            self.system_settings.update(data.get("system_settings", {}))
-            self.bluetooth_enabled = data.get("bluetooth_enabled", False)
+            if hasattr(self.os, 'data_manager'):
+                data = self.os.data_manager.get_module_data("Settings")
+                self.mail_accounts = data.get("mail_accounts", [])
+                self.system_settings.update(data.get("system_settings", {}))
+                self.bluetooth_enabled = data.get("bluetooth_enabled", False)
         except Exception as e:
             print(f"Error loading settings: {e}")
     
     def save_settings(self):
         """Save settings to data manager"""
         try:
-            data = {
-                "mail_accounts": self.mail_accounts,
-                "system_settings": self.system_settings,
-                "bluetooth_enabled": self.bluetooth_enabled
-            }
-            self.os.data_manager.set_module_data("Settings", data)
+            if hasattr(self.os, 'data_manager'):
+                data = {
+                    "mail_accounts": self.mail_accounts,
+                    "system_settings": self.system_settings,
+                    "bluetooth_enabled": self.bluetooth_enabled
+                }
+                self.os.data_manager.set_module_data("Settings", data)
         except Exception as e:
             print(f"Error saving settings: {e}")
     
+    def check_wifi_status(self):
+        """Check current WiFi connection status"""
+        try:
+            if hasattr(self.os, 'hardware_manager'):
+                status = self.os.hardware_manager.get_wifi_status()
+                if status.get('connected', False):
+                    self.wifi_connection_status = f"Connected to {status.get('ssid', 'Unknown')}"
+                    self.wifi_current_network = status.get('ssid', 'Unknown')
+                else:
+                    self.wifi_connection_status = "Disconnected"
+                    self.wifi_current_network = None
+        except Exception as e:
+            print(f"Error checking WiFi status: {e}")
+            self.wifi_connection_status = "Status unknown"
+    
     def handle_events(self, event):
         """Handle settings events"""
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE:
-                if self.mode == "categories":
-                    return "back"
-                elif self.wifi_input_mode:
-                    self.wifi_input_mode = False
-                    self.wifi_password = ""
-                elif self.mail_input_mode:
-                    self.cancel_mail_edit()
-                else:
-                    self.mode = "categories"
-                    self.selected_item = 0
-                    self.scroll_offset = 0
-            
-            elif self.mode == "categories":
-                self.handle_category_events(event)
-            
-            elif self.mode == "wifi":
-                self.handle_wifi_events(event)
-            
-            elif self.mode == "bluetooth":
-                self.handle_bluetooth_events(event)
-            
-            elif self.mode == "mail":
-                self.handle_mail_events(event)
-            
-            elif self.mode == "system":
-                self.handle_system_events(event)
+        try:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return self.exit_mode()
+                
+                elif self.mode == "categories":
+                    self.handle_category_events(event)
+                
+                elif self.mode == "wifi":
+                    self.handle_wifi_events(event)
+                
+                elif self.mode == "bluetooth":
+                    self.handle_bluetooth_events(event)
+                
+                elif self.mode == "mail":
+                    self.handle_mail_events(event)
+                
+                elif self.mode == "system":
+                    self.handle_system_events(event)
+        except Exception as e:
+            print(f"Error handling events: {e}")
         
         return None
+    
+    def exit_mode(self):
+        """Exit current mode or operation"""
+        if self.mode == "categories":
+            return "back"
+        elif self.wifi_input_mode:
+            self.wifi_input_mode = False
+            self.wifi_password = ""
+            return None
+        elif self.mail_input_mode:
+            self.cancel_mail_edit()
+            return None
+        else:
+            self.mode = "categories"
+            self.selected_item = 0
+            self.scroll_offset = 0
+            return None
     
     def handle_category_events(self, event):
         """Handle category selection events"""
@@ -132,13 +184,9 @@ class Settings:
         elif event.key == pygame.K_RETURN:
             category = self.settings_categories[self.selected_category]
             if category == "WiFi":
-                self.mode = "wifi"
-                self.selected_item = 0
-                self.start_wifi_scan()
+                self.enter_wifi_mode()
             elif category == "Bluetooth":
-                self.mode = "bluetooth"
-                self.selected_item = 0
-                self.bluetooth_enabled = self.os.hardware_manager.enable_bluetooth()
+                self.enter_bluetooth_mode()
             elif category == "Mail Accounts":
                 self.mode = "mail"
                 self.selected_item = 0
@@ -146,32 +194,53 @@ class Settings:
                 self.mode = "system"
                 self.selected_item = 0
     
+    def enter_wifi_mode(self):
+        """Enter WiFi settings mode"""
+        self.mode = "wifi"
+        self.selected_item = 0
+        self.wifi_selected = 0
+        self.check_wifi_status()
+        # Auto-scan when entering WiFi mode
+        self.start_wifi_scan()
+    
+    def enter_bluetooth_mode(self):
+        """Enter Bluetooth settings mode"""
+        self.mode = "bluetooth"
+        self.selected_item = 0
+        self.bluetooth_selected = 0
+        # Check if Bluetooth is enabled
+        self.check_bluetooth_status()
+        if self.bluetooth_enabled:
+            self.start_bluetooth_scan()
+    
+    def check_bluetooth_status(self):
+        """Check Bluetooth status"""
+        try:
+            if hasattr(self.os, 'hardware_manager'):
+                # Try to enable Bluetooth to check status
+                self.bluetooth_enabled = self.os.hardware_manager.enable_bluetooth()
+                if self.bluetooth_enabled:
+                    self.bluetooth_connection_status = "Enabled"
+                else:
+                    self.bluetooth_connection_status = "Disabled"
+        except Exception as e:
+            print(f"Error checking Bluetooth status: {e}")
+            self.bluetooth_connection_status = "Error"
+    
     def handle_wifi_events(self, event):
         """Handle WiFi settings events"""
         if self.wifi_input_mode:
-            if event.key == pygame.K_RETURN:
-                self.connect_to_wifi()
-            elif event.key == pygame.K_BACKSPACE:
-                self.wifi_password = self.wifi_password[:-1]
-            else:
-                char = event.unicode
-                if char.isprintable() and len(self.wifi_password) < 50:
-                    self.wifi_password += char
+            self.handle_wifi_password_input(event)
         else:
             if event.key == pygame.K_UP:
                 self.wifi_selected = max(0, self.wifi_selected - 1)
             
             elif event.key == pygame.K_DOWN:
-                self.wifi_selected = min(len(self.wifi_networks) - 1, self.wifi_selected + 1)
+                max_selection = max(0, len(self.wifi_networks) - 1)
+                self.wifi_selected = min(max_selection, self.wifi_selected + 1)
             
             elif event.key == pygame.K_RETURN:
-                if self.wifi_networks and self.wifi_selected < len(self.wifi_networks):
-                    network = self.wifi_networks[self.wifi_selected]
-                    if network.get("encrypted", False):
-                        self.wifi_input_mode = True
-                        self.wifi_password = ""
-                    else:
-                        self.connect_to_wifi()
+                self.connect_to_selected_wifi()
             
             elif event.key == pygame.K_r:
                 self.start_wifi_scan()
@@ -179,29 +248,201 @@ class Settings:
             elif event.key == pygame.K_d:
                 self.disconnect_wifi()
     
+    def handle_wifi_password_input(self, event):
+        """Handle password input for WiFi"""
+        if event.key == pygame.K_RETURN:
+            self.connect_to_wifi()
+        elif event.key == pygame.K_BACKSPACE:
+            self.wifi_password = self.wifi_password[:-1]
+        elif event.key == pygame.K_ESCAPE:
+            self.wifi_input_mode = False
+            self.wifi_password = ""
+        else:
+            char = event.unicode
+            if char.isprintable() and len(self.wifi_password) < 50:
+                self.wifi_password += char
+    
+    def connect_to_selected_wifi(self):
+        """Connect to the selected WiFi network"""
+        if self.wifi_networks and self.wifi_selected < len(self.wifi_networks):
+            network = self.wifi_networks[self.wifi_selected]
+            if network.get("encrypted", False):
+                self.wifi_input_mode = True
+                self.wifi_password = ""
+            else:
+                self.connect_to_wifi()
+    
     def handle_bluetooth_events(self, event):
         """Handle Bluetooth settings events"""
         if event.key == pygame.K_UP:
             self.bluetooth_selected = max(0, self.bluetooth_selected - 1)
         
         elif event.key == pygame.K_DOWN:
-            self.bluetooth_selected = min(len(self.bluetooth_devices) - 1, self.bluetooth_selected + 1)
+            max_selection = max(0, len(self.bluetooth_devices) - 1)
+            self.bluetooth_selected = min(max_selection, self.bluetooth_selected + 1)
         
         elif event.key == pygame.K_RETURN:
-            if self.bluetooth_devices and self.bluetooth_selected < len(self.bluetooth_devices):
-                device = self.bluetooth_devices[self.bluetooth_selected]
-                self.connect_bluetooth_device(device["address"])
+            self.connect_to_selected_bluetooth()
         
         elif event.key == pygame.K_r:
             if self.bluetooth_enabled:
                 self.start_bluetooth_scan()
+            else:
+                self.bluetooth_connection_status = "Bluetooth is disabled"
         
         elif event.key == pygame.K_t:
-            self.bluetooth_enabled = not self.bluetooth_enabled
-            if self.bluetooth_enabled:
-                self.os.hardware_manager.enable_bluetooth()
+            self.toggle_bluetooth()
+    
+    def toggle_bluetooth(self):
+        """Toggle Bluetooth on or off"""
+        try:
+            if hasattr(self.os, 'hardware_manager'):
+                if self.bluetooth_enabled:
+                    self.os.hardware_manager.disable_bluetooth()
+                    self.bluetooth_enabled = False
+                    self.bluetooth_connection_status = "Disabled"
+                    self.bluetooth_devices = []
+                else:
+                    self.bluetooth_enabled = self.os.hardware_manager.enable_bluetooth()
+                    if self.bluetooth_enabled:
+                        self.bluetooth_connection_status = "Enabled"
+                        self.start_bluetooth_scan()
+                    else:
+                        self.bluetooth_connection_status = "Failed to enable"
+                
+                self.save_settings()
+        except Exception as e:
+            print(f"Error toggling Bluetooth: {e}")
+            self.bluetooth_connection_status = f"Error: {e}"
+    
+    def start_wifi_scan(self):
+        """Start WiFi network scan"""
+        if not self.wifi_scanning:
+            self.wifi_scanning = True
+            self.wifi_networks = []
+            self.wifi_connection_status = "Scanning..."
+            
+            def scan_thread():
+                try:
+                    if hasattr(self.os, 'hardware_manager'):
+                        networks = self.os.hardware_manager.scan_wifi_networks()
+                        self.wifi_networks = networks if networks else []
+                        if self.wifi_networks:
+                            self.wifi_connection_status = f"Found {len(self.wifi_networks)} networks"
+                        else:
+                            self.wifi_connection_status = "No networks found"
+                    else:
+                        self.wifi_connection_status = "Hardware manager not available"
+                except Exception as e:
+                    print(f"WiFi scan error: {e}")
+                    self.wifi_connection_status = f"Scan failed: {str(e)[:30]}"
+                finally:
+                    self.wifi_scanning = False
+            
+            thread = threading.Thread(target=scan_thread)
+            thread.daemon = True
+            thread.start()
+    
+    def connect_to_wifi(self):
+        """Connect to selected WiFi network"""
+        if self.wifi_networks and self.wifi_selected < len(self.wifi_networks):
+            network = self.wifi_networks[self.wifi_selected]
+            ssid = network.get("name", "")
+            password = self.wifi_password
+            
+            self.wifi_connection_status = f"Connecting to {ssid}..."
+            
+            def connect_thread():
+                try:
+                    if hasattr(self.os, 'hardware_manager'):
+                        success = self.os.hardware_manager.connect_wifi(ssid, password)
+                        if success:
+                            self.wifi_connection_status = f"Connected to {ssid}"
+                            self.wifi_current_network = ssid
+                        else:
+                            self.wifi_connection_status = f"Failed to connect to {ssid}"
+                    else:
+                        self.wifi_connection_status = "Hardware manager not available"
+                except Exception as e:
+                    print(f"WiFi connection error: {e}")
+                    self.wifi_connection_status = f"Connection error: {str(e)[:30]}"
+                finally:
+                    self.wifi_input_mode = False
+                    self.wifi_password = ""
+            
+            thread = threading.Thread(target=connect_thread)
+            thread.daemon = True
+            thread.start()
+    
+    def disconnect_wifi(self):
+        """Disconnect from WiFi"""
+        try:
+            if hasattr(self.os, 'hardware_manager'):
+                self.os.hardware_manager.disconnect_wifi()
+                self.wifi_connection_status = "Disconnected"
+                self.wifi_current_network = None
             else:
-                self.os.hardware_manager.disable_bluetooth()
+                self.wifi_connection_status = "Hardware manager not available"
+        except Exception as e:
+            print(f"WiFi disconnect error: {e}")
+            self.wifi_connection_status = f"Disconnect failed: {str(e)[:30]}"
+    
+    def start_bluetooth_scan(self):
+        """Start Bluetooth device scan"""
+        if not self.bluetooth_scanning and self.bluetooth_enabled:
+            self.bluetooth_scanning = True
+            self.bluetooth_devices = []
+            self.bluetooth_connection_status = "Scanning..."
+            
+            def scan_thread():
+                try:
+                    if hasattr(self.os, 'hardware_manager'):
+                        devices = self.os.hardware_manager.scan_bluetooth_devices()
+                        self.bluetooth_devices = devices if devices else []
+                        if self.bluetooth_devices:
+                            self.bluetooth_connection_status = f"Found {len(self.bluetooth_devices)} devices"
+                        else:
+                            self.bluetooth_connection_status = "No devices found"
+                    else:
+                        self.bluetooth_connection_status = "Hardware manager not available"
+                except Exception as e:
+                    print(f"Bluetooth scan error: {e}")
+                    self.bluetooth_connection_status = f"Scan failed: {str(e)[:30]}"
+                finally:
+                    self.bluetooth_scanning = False
+            
+            thread = threading.Thread(target=scan_thread)
+            thread.daemon = True
+            thread.start()
+        elif not self.bluetooth_enabled:
+            self.bluetooth_connection_status = "Bluetooth is disabled"
+    
+    def connect_to_selected_bluetooth(self):
+        """Connect to the selected Bluetooth device"""
+        if self.bluetooth_devices and self.bluetooth_selected < len(self.bluetooth_devices):
+            device = self.bluetooth_devices[self.bluetooth_selected]
+            address = device.get("address", "")
+            name = device.get("name", "Unknown")
+            
+            self.bluetooth_connection_status = f"Connecting to {name}..."
+            
+            def connect_thread():
+                try:
+                    if hasattr(self.os, 'hardware_manager'):
+                        success = self.os.hardware_manager.connect_bluetooth_device(address)
+                        if success:
+                            self.bluetooth_connection_status = f"Connected to {name}"
+                        else:
+                            self.bluetooth_connection_status = f"Failed to connect to {name}"
+                    else:
+                        self.bluetooth_connection_status = "Hardware manager not available"
+                except Exception as e:
+                    print(f"Bluetooth connection error: {e}")
+                    self.bluetooth_connection_status = f"Connection error: {str(e)[:30]}"
+            
+            thread = threading.Thread(target=connect_thread)
+            thread.daemon = True
+            thread.start()
     
     def handle_mail_events(self, event):
         """Handle mail account events"""
@@ -270,94 +511,6 @@ class Settings:
         
         elif event.key == pygame.K_RIGHT:
             self.adjust_system_setting(1)
-    
-    def start_wifi_scan(self):
-        """Start WiFi network scan"""
-        if not self.wifi_scanning:
-            self.wifi_scanning = True
-            self.wifi_networks = []
-            
-            def scan_thread():
-                try:
-                    networks = self.os.hardware_manager.scan_wifi_networks()
-                    self.wifi_networks = networks
-                    self.wifi_connection_status = "Scan complete"
-                except Exception as e:
-                    self.wifi_connection_status = f"Scan failed: {e}"
-                finally:
-                    self.wifi_scanning = False
-            
-            thread = threading.Thread(target=scan_thread)
-            thread.daemon = True
-            thread.start()
-    
-    def connect_to_wifi(self):
-        """Connect to selected WiFi network"""
-        if self.wifi_networks and self.wifi_selected < len(self.wifi_networks):
-            network = self.wifi_networks[self.wifi_selected]
-            ssid = network["name"]
-            password = self.wifi_password
-            
-            def connect_thread():
-                try:
-                    success = self.os.hardware_manager.connect_wifi(ssid, password)
-                    if success:
-                        self.wifi_connection_status = f"Connected to {ssid}"
-                    else:
-                        self.wifi_connection_status = f"Failed to connect to {ssid}"
-                except Exception as e:
-                    self.wifi_connection_status = f"Connection error: {e}"
-                finally:
-                    self.wifi_input_mode = False
-                    self.wifi_password = ""
-            
-            thread = threading.Thread(target=connect_thread)
-            thread.daemon = True
-            thread.start()
-    
-    def disconnect_wifi(self):
-        """Disconnect from WiFi"""
-        try:
-            self.os.hardware_manager.disconnect_wifi()
-            self.wifi_connection_status = "Disconnected"
-        except Exception as e:
-            self.wifi_connection_status = f"Disconnect failed: {e}"
-    
-    def start_bluetooth_scan(self):
-        """Start Bluetooth device scan"""
-        if not self.bluetooth_scanning and self.bluetooth_enabled:
-            self.bluetooth_scanning = True
-            self.bluetooth_devices = []
-            
-            def scan_thread():
-                try:
-                    devices = self.os.hardware_manager.scan_bluetooth_devices()
-                    self.bluetooth_devices = devices
-                    self.bluetooth_connection_status = "Scan complete"
-                except Exception as e:
-                    self.bluetooth_connection_status = f"Scan failed: {e}"
-                finally:
-                    self.bluetooth_scanning = False
-            
-            thread = threading.Thread(target=scan_thread)
-            thread.daemon = True
-            thread.start()
-    
-    def connect_bluetooth_device(self, address):
-        """Connect to Bluetooth device"""
-        def connect_thread():
-            try:
-                success = self.os.hardware_manager.connect_bluetooth_device(address)
-                if success:
-                    self.bluetooth_connection_status = f"Connected to {address}"
-                else:
-                    self.bluetooth_connection_status = f"Failed to connect to {address}"
-            except Exception as e:
-                self.bluetooth_connection_status = f"Connection error: {e}"
-        
-        thread = threading.Thread(target=connect_thread)
-        thread.daemon = True
-        thread.start()
     
     def add_mail_account(self):
         """Add new mail account"""
@@ -439,27 +592,43 @@ class Settings:
     
     def draw(self, screen):
         """Draw settings interface"""
-        if self.mode == "categories":
-            self.draw_categories(screen)
-        elif self.mode == "wifi":
-            self.draw_wifi_settings(screen)
-        elif self.mode == "bluetooth":
-            self.draw_bluetooth_settings(screen)
-        elif self.mode == "mail":
-            self.draw_mail_settings(screen)
-        elif self.mode == "system":
-            self.draw_system_settings(screen)
+        try:
+            # Clear screen
+            screen.fill((0, 0, 0))
+            
+            if self.mode == "categories":
+                self.draw_categories(screen)
+            elif self.mode == "wifi":
+                self.draw_wifi_settings(screen)
+            elif self.mode == "bluetooth":
+                self.draw_bluetooth_settings(screen)
+            elif self.mode == "mail":
+                self.draw_mail_settings(screen)
+            elif self.mode == "system":
+                self.draw_system_settings(screen)
+        except Exception as e:
+            print(f"Error drawing settings: {e}")
+            # Draw error message
+            if hasattr(self.os, 'font_m'):
+                error_surface = self.os.font_m.render(f"Error: {e}", True, ERROR_COLOR)
+                screen.blit(error_surface, (10, 10))
     
     def draw_categories(self, screen):
         """Draw settings categories"""
         # Header
         header_text = "Settings"
-        header_surface = self.os.font_l.render(header_text, True, ACCENT_COLOR)
+        if hasattr(self.os, 'font_l'):
+            header_surface = self.os.font_l.render(header_text, True, ACCENT_COLOR)
+        else:
+            header_surface = pygame.font.Font(None, 24).render(header_text, True, ACCENT_COLOR)
+        
         header_x = SCREEN_WIDTH // 2 - header_surface.get_width() // 2
         screen.blit(header_surface, (header_x, 5))
         
         # Categories
         start_y = 40
+        font = self.os.font_m if hasattr(self.os, 'font_m') else pygame.font.Font(None, 20)
+        
         for i, category in enumerate(self.settings_categories):
             y_pos = start_y + i * 25
             
@@ -470,13 +639,13 @@ class Settings:
                 pygame.draw.rect(screen, ACCENT_COLOR, cat_rect, 2)
             
             # Category text
-            cat_surface = self.os.font_m.render(category, True, TEXT_COLOR)
+            cat_surface = font.render(category, True, TEXT_COLOR)
             screen.blit(cat_surface, (20, y_pos))
             
             # Status indicator
             status_color = SUCCESS_COLOR
             if category == "WiFi":
-                status_color = SUCCESS_COLOR if self.wifi_connection_status == "Connected" else ERROR_COLOR
+                status_color = SUCCESS_COLOR if self.wifi_current_network else ERROR_COLOR
             elif category == "Bluetooth":
                 status_color = SUCCESS_COLOR if self.bluetooth_enabled else ERROR_COLOR
             elif category == "Mail Accounts":
@@ -491,9 +660,10 @@ class Settings:
             "ESC: Back"
         ]
         
+        control_font = self.os.font_tiny if hasattr(self.os, 'font_tiny') else pygame.font.Font(None, 16)
         control_y = SCREEN_HEIGHT - 30
         for i, control in enumerate(controls):
-            control_surface = self.os.font_tiny.render(control, True, HIGHLIGHT_COLOR)
+            control_surface = control_font.render(control, True, HIGHLIGHT_COLOR)
             control_x = 10 + i * 120
             screen.blit(control_surface, (control_x, control_y))
     
@@ -501,23 +671,27 @@ class Settings:
         """Draw WiFi settings"""
         # Header
         header_text = "WiFi Settings"
-        header_surface = self.os.font_l.render(header_text, True, ACCENT_COLOR)
+        font_l = self.os.font_l if hasattr(self.os, 'font_l') else pygame.font.Font(None, 24)
+        header_surface = font_l.render(header_text, True, ACCENT_COLOR)
         header_x = SCREEN_WIDTH // 2 - header_surface.get_width() // 2
         screen.blit(header_surface, (header_x, 5))
         
+        font_m = self.os.font_m if hasattr(self.os, 'font_m') else pygame.font.Font(None, 20)
+        font_s = self.os.font_s if hasattr(self.os, 'font_s') else pygame.font.Font(None, 16)
+        
         # Status
-        status_surface = self.os.font_m.render(self.wifi_connection_status, True, 
-                                             SUCCESS_COLOR if "Connected" in self.wifi_connection_status else HIGHLIGHT_COLOR)
+        status_color = SUCCESS_COLOR if "Connected" in self.wifi_connection_status else HIGHLIGHT_COLOR
+        status_surface = font_m.render(self.wifi_connection_status, True, status_color)
         screen.blit(status_surface, (10, 30))
         
         # Networks
         if self.wifi_scanning:
             scan_text = "Scanning for networks..."
-            scan_surface = self.os.font_m.render(scan_text, True, WARNING_COLOR)
+            scan_surface = font_m.render(scan_text, True, WARNING_COLOR)
             screen.blit(scan_surface, (10, 55))
         elif not self.wifi_networks:
-            no_networks_text = "No networks found"
-            no_networks_surface = self.os.font_m.render(no_networks_text, True, ERROR_COLOR)
+            no_networks_text = "No networks found - Press R to scan"
+            no_networks_surface = font_m.render(no_networks_text, True, ERROR_COLOR)
             screen.blit(no_networks_surface, (10, 55))
         else:
             # Network list
@@ -530,24 +704,25 @@ class Settings:
                     pygame.draw.rect(screen, SELECTED_COLOR, net_rect)
                 
                 # Network name
-                net_surface = self.os.font_m.render(network["name"], True, TEXT_COLOR)
+                net_name = network.get("name", "Unknown")
+                net_surface = font_m.render(net_name, True, TEXT_COLOR)
                 screen.blit(net_surface, (15, y_pos))
                 
                 # Security indicator
                 if network.get("encrypted", False):
-                    lock_surface = self.os.font_s.render("🔒", True, WARNING_COLOR)
+                    lock_surface = font_s.render("🔒", True, WARNING_COLOR)
                     screen.blit(lock_surface, (SCREEN_WIDTH - 40, y_pos))
                 
                 # Signal strength
-                quality = network.get("quality", "0/0")
-                quality_surface = self.os.font_s.render(quality, True, HIGHLIGHT_COLOR)
+                quality = network.get("quality", "Unknown")
+                quality_surface = font_s.render(str(quality), True, HIGHLIGHT_COLOR)
                 screen.blit(quality_surface, (SCREEN_WIDTH - 80, y_pos + 5))
         
         # Password input
         if self.wifi_input_mode:
             input_y = SCREEN_HEIGHT - 80
             input_label = "Password:"
-            input_surface = self.os.font_m.render(input_label, True, TEXT_COLOR)
+            input_surface = font_m.render(input_label, True, TEXT_COLOR)
             screen.blit(input_surface, (10, input_y))
             
             input_rect = pygame.Rect(10, input_y + 20, SCREEN_WIDTH - 20, 25)
@@ -558,7 +733,7 @@ class Settings:
             if self.text_cursor_visible:
                 password_display += "|"
             
-            password_surface = self.os.font_m.render(password_display, True, TEXT_COLOR)
+            password_surface = font_m.render(password_display, True, TEXT_COLOR)
             screen.blit(password_surface, (15, input_y + 23))
         
         # Controls
@@ -570,9 +745,10 @@ class Settings:
             "ESC: Back"
         ]
         
+        control_font = self.os.font_tiny if hasattr(self.os, 'font_tiny') else pygame.font.Font(None, 16)
         control_y = SCREEN_HEIGHT - 40
         for i, control in enumerate(controls):
-            control_surface = self.os.font_tiny.render(control, True, HIGHLIGHT_COLOR)
+            control_surface = control_font.render(control, True, HIGHLIGHT_COLOR)
             control_x = 10 + (i % 3) * 125
             control_y_pos = control_y + (i // 3) * 12
             screen.blit(control_surface, (control_x, control_y_pos))
@@ -581,33 +757,37 @@ class Settings:
         """Draw Bluetooth settings"""
         # Header
         header_text = "Bluetooth Settings"
-        header_surface = self.os.font_l.render(header_text, True, ACCENT_COLOR)
+        font_l = self.os.font_l if hasattr(self.os, 'font_l') else pygame.font.Font(None, 24)
+        header_surface = font_l.render(header_text, True, ACCENT_COLOR)
         header_x = SCREEN_WIDTH // 2 - header_surface.get_width() // 2
         screen.blit(header_surface, (header_x, 5))
+        
+        font_m = self.os.font_m if hasattr(self.os, 'font_m') else pygame.font.Font(None, 20)
+        font_s = self.os.font_s if hasattr(self.os, 'font_s') else pygame.font.Font(None, 16)
         
         # Status
         status_text = "Enabled" if self.bluetooth_enabled else "Disabled"
         status_color = SUCCESS_COLOR if self.bluetooth_enabled else ERROR_COLOR
-        status_surface = self.os.font_m.render(status_text, True, status_color)
+        status_surface = font_m.render(status_text, True, status_color)
         screen.blit(status_surface, (10, 30))
         
         # Connection status
         if self.bluetooth_connection_status:
-            conn_surface = self.os.font_s.render(self.bluetooth_connection_status, True, HIGHLIGHT_COLOR)
+            conn_surface = font_s.render(self.bluetooth_connection_status, True, HIGHLIGHT_COLOR)
             screen.blit(conn_surface, (10, 50))
         
         # Devices
         if not self.bluetooth_enabled:
-            disabled_text = "Bluetooth is disabled"
-            disabled_surface = self.os.font_m.render(disabled_text, True, WARNING_COLOR)
+            disabled_text = "Bluetooth is disabled - Press T to enable"
+            disabled_surface = font_m.render(disabled_text, True, WARNING_COLOR)
             screen.blit(disabled_surface, (10, 80))
         elif self.bluetooth_scanning:
             scan_text = "Scanning for devices..."
-            scan_surface = self.os.font_m.render(scan_text, True, WARNING_COLOR)
+            scan_surface = font_m.render(scan_text, True, WARNING_COLOR)
             screen.blit(scan_surface, (10, 80))
         elif not self.bluetooth_devices:
-            no_devices_text = "No devices found"
-            no_devices_surface = self.os.font_m.render(no_devices_text, True, ERROR_COLOR)
+            no_devices_text = "No devices found - Press R to scan"
+            no_devices_surface = font_m.render(no_devices_text, True, ERROR_COLOR)
             screen.blit(no_devices_surface, (10, 80))
         else:
             # Device list
@@ -620,11 +800,13 @@ class Settings:
                     pygame.draw.rect(screen, SELECTED_COLOR, dev_rect)
                 
                 # Device name
-                dev_surface = self.os.font_m.render(device["name"], True, TEXT_COLOR)
+                dev_name = device.get("name", "Unknown Device")
+                dev_surface = font_m.render(dev_name, True, TEXT_COLOR)
                 screen.blit(dev_surface, (15, y_pos))
                 
                 # Device address
-                addr_surface = self.os.font_s.render(device["address"], True, HIGHLIGHT_COLOR)
+                addr = device.get("address", "Unknown")
+                addr_surface = font_s.render(addr, True, HIGHLIGHT_COLOR)
                 screen.blit(addr_surface, (15, y_pos + 12))
         
         # Controls
@@ -636,9 +818,10 @@ class Settings:
             "ESC: Back"
         ]
         
+        control_font = self.os.font_tiny if hasattr(self.os, 'font_tiny') else pygame.font.Font(None, 16)
         control_y = SCREEN_HEIGHT - 30
         for i, control in enumerate(controls):
-            control_surface = self.os.font_tiny.render(control, True, HIGHLIGHT_COLOR)
+            control_surface = control_font.render(control, True, HIGHLIGHT_COLOR)
             control_x = 10 + (i % 3) * 125
             control_y_pos = control_y + (i // 3) * 12
             screen.blit(control_surface, (control_x, control_y_pos))
@@ -647,14 +830,18 @@ class Settings:
         """Draw mail account settings"""
         # Header
         header_text = "Mail Accounts"
-        header_surface = self.os.font_l.render(header_text, True, ACCENT_COLOR)
+        font_l = self.os.font_l if hasattr(self.os, 'font_l') else pygame.font.Font(None, 24)
+        header_surface = font_l.render(header_text, True, ACCENT_COLOR)
         header_x = SCREEN_WIDTH // 2 - header_surface.get_width() // 2
         screen.blit(header_surface, (header_x, 5))
+        
+        font_m = self.os.font_m if hasattr(self.os, 'font_m') else pygame.font.Font(None, 20)
+        font_s = self.os.font_s if hasattr(self.os, 'font_s') else pygame.font.Font(None, 16)
         
         if self.mail_input_mode:
             # Account editing mode
             edit_title = "Edit Account" if self.mail_editing_account is not None else "Add Account"
-            edit_surface = self.os.font_m.render(edit_title, True, ACCENT_COLOR)
+            edit_surface = font_m.render(edit_title, True, ACCENT_COLOR)
             screen.blit(edit_surface, (10, 30))
             
             # Input fields
@@ -664,7 +851,7 @@ class Settings:
                 
                 # Field label
                 field_label = field.replace("_", " ").title() + ":"
-                label_surface = self.os.font_s.render(field_label, True, TEXT_COLOR)
+                label_surface = font_s.render(field_label, True, TEXT_COLOR)
                 screen.blit(label_surface, (10, field_y))
                 
                 # Input field
@@ -684,13 +871,13 @@ class Settings:
                 if len(field_value) > 30:
                     field_value = field_value[:30] + "..."
                 
-                value_surface = self.os.font_s.render(field_value, True, TEXT_COLOR)
+                value_surface = font_s.render(field_value, True, TEXT_COLOR)
                 screen.blit(value_surface, (85, field_y + 2))
         else:
             # Account list mode
             if not self.mail_accounts:
                 no_accounts_text = "No mail accounts configured"
-                no_accounts_surface = self.os.font_m.render(no_accounts_text, True, WARNING_COLOR)
+                no_accounts_surface = font_m.render(no_accounts_text, True, WARNING_COLOR)
                 screen.blit(no_accounts_surface, (10, 60))
             else:
                 # Account list
@@ -703,11 +890,11 @@ class Settings:
                         pygame.draw.rect(screen, SELECTED_COLOR, acc_rect)
                     
                     # Account name
-                    name_surface = self.os.font_m.render(account.get("name", "Unnamed"), True, TEXT_COLOR)
+                    name_surface = font_m.render(account.get("name", "Unnamed"), True, TEXT_COLOR)
                     screen.blit(name_surface, (15, y_pos))
                     
                     # Account email
-                    email_surface = self.os.font_s.render(account.get("email", ""), True, HIGHLIGHT_COLOR)
+                    email_surface = font_s.render(account.get("email", ""), True, HIGHLIGHT_COLOR)
                     screen.blit(email_surface, (15, y_pos + 15))
             
             # Add new account option
@@ -716,7 +903,7 @@ class Settings:
                 add_rect = pygame.Rect(10, add_y - 2, SCREEN_WIDTH - 20, 22)
                 pygame.draw.rect(screen, SELECTED_COLOR, add_rect)
             
-            add_surface = self.os.font_m.render("+ Add New Account", True, SUCCESS_COLOR)
+            add_surface = font_m.render("+ Add New Account", True, SUCCESS_COLOR)
             screen.blit(add_surface, (15, add_y))
         
         # Controls
@@ -735,9 +922,10 @@ class Settings:
                 "ESC: Back"
             ]
         
+        control_font = self.os.font_tiny if hasattr(self.os, 'font_tiny') else pygame.font.Font(None, 16)
         control_y = SCREEN_HEIGHT - 30
         for i, control in enumerate(controls):
-            control_surface = self.os.font_tiny.render(control, True, HIGHLIGHT_COLOR)
+            control_surface = control_font.render(control, True, HIGHLIGHT_COLOR)
             control_x = 10 + (i % 2) * 180
             control_y_pos = control_y + (i // 2) * 12
             screen.blit(control_surface, (control_x, control_y_pos))
@@ -746,9 +934,12 @@ class Settings:
         """Draw system settings"""
         # Header
         header_text = "System Settings"
-        header_surface = self.os.font_l.render(header_text, True, ACCENT_COLOR)
+        font_l = self.os.font_l if hasattr(self.os, 'font_l') else pygame.font.Font(None, 24)
+        header_surface = font_l.render(header_text, True, ACCENT_COLOR)
         header_x = SCREEN_WIDTH // 2 - header_surface.get_width() // 2
         screen.blit(header_surface, (header_x, 5))
+        
+        font_m = self.os.font_m if hasattr(self.os, 'font_m') else pygame.font.Font(None, 20)
         
         # Settings list
         settings_items = [
@@ -769,7 +960,7 @@ class Settings:
                 pygame.draw.rect(screen, SELECTED_COLOR, setting_rect)
             
             # Setting label
-            label_surface = self.os.font_m.render(label, True, TEXT_COLOR)
+            label_surface = font_m.render(label, True, TEXT_COLOR)
             screen.blit(label_surface, (15, y_pos))
             
             # Setting value
@@ -780,7 +971,7 @@ class Settings:
                 value_text = str(value)
                 value_color = TEXT_COLOR
             
-            value_surface = self.os.font_m.render(value_text, True, value_color)
+            value_surface = font_m.render(value_text, True, value_color)
             value_x = SCREEN_WIDTH - value_surface.get_width() - 15
             screen.blit(value_surface, (value_x, y_pos))
         
@@ -792,9 +983,10 @@ class Settings:
             "ESC: Back"
         ]
         
+        control_font = self.os.font_tiny if hasattr(self.os, 'font_tiny') else pygame.font.Font(None, 16)
         control_y = SCREEN_HEIGHT - 30
         for i, control in enumerate(controls):
-            control_surface = self.os.font_tiny.render(control, True, HIGHLIGHT_COLOR)
+            control_surface = control_font.render(control, True, HIGHLIGHT_COLOR)
             control_x = 10 + (i % 2) * 180
             control_y_pos = control_y + (i // 2) * 12
             screen.blit(control_surface, (control_x, control_y_pos))
