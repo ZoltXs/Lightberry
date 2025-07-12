@@ -1,6 +1,6 @@
 """
 Enhanced Calculator Module for LightBerry OS
-Professional calculator with advanced functions and improved navigation
+Optimized for 400x240 screen resolution
 """
 
 import pygame
@@ -24,6 +24,7 @@ class Calculator:
         self.history = []
         self.memory = 0
         self.advanced_mode = False
+        self.show_info = False
         
         # Button animation
         self.button_press_time = 0
@@ -42,17 +43,15 @@ class Calculator:
                 # Row 1
                 ["MC", "MR", "M+", "M-"],
                 # Row 2
-                ["C", "CE", "√", "x²"],
+                ["C", "CE", "√", "÷"],
                 # Row 3
-                ["7", "8", "9", "÷"],
+                ["7", "8", "9", "×"],
                 # Row 4
-                ["4", "5", "6", "×"],
+                ["4", "5", "6", "-"],
                 # Row 5
-                ["1", "2", "3", "-"],
+                ["1", "2", "3", "+"],
                 # Row 6
-                ["0", ".", "=", "+"],
-                # Row 7
-                ["π", "e", "x³", "1/x"]
+                ["0", ".", "=", "π"]
             ]
         else:
             self.buttons = [
@@ -71,62 +70,51 @@ class Calculator:
         self.rows = len(self.buttons)
         self.cols = len(self.buttons[0]) if self.buttons else 0
         
-        # Calculate button dimensions
+        # Calculate button dimensions for 400x240 screen
         self.button_width = (SCREEN_WIDTH - 20) // self.cols
-        self.button_height = 25
-        self.grid_start_y = 80
+        self.button_height = 22  # Reduced height to fit on screen
+        self.grid_start_y = 70  # Reduced start position
     
     def handle_events(self, event):
         """Handle calculator events"""
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 return "back"
-            
+            elif event.key == pygame.K_i:
+                self.show_info = not self.show_info
             elif event.key == pygame.K_UP:
                 self.selected_button = max(0, self.selected_button - self.cols)
-            
             elif event.key == pygame.K_DOWN:
                 max_button = self.rows * self.cols - 1
                 self.selected_button = min(max_button, self.selected_button + self.cols)
-            
             elif event.key == pygame.K_LEFT:
                 if self.selected_button % self.cols > 0:
                     self.selected_button -= 1
-            
             elif event.key == pygame.K_RIGHT:
                 if self.selected_button % self.cols < self.cols - 1:
                     max_button = self.rows * self.cols - 1
                     if self.selected_button < max_button:
                         self.selected_button += 1
-            
             elif event.key == pygame.K_RETURN:
                 self.press_button(self.selected_button)
-            
             elif event.key == pygame.K_m:
                 self.advanced_mode = not self.advanced_mode
                 self.setup_buttons()
                 self.selected_button = 0
-            
             # Direct number input
             elif event.key >= pygame.K_0 and event.key <= pygame.K_9:
                 number = str(event.key - pygame.K_0)
                 self.input_number(number)
-            
             elif event.key == pygame.K_PERIOD:
                 self.input_decimal()
-            
             elif event.key == pygame.K_PLUS:
                 self.input_operation("+")
-            
             elif event.key == pygame.K_MINUS:
                 self.input_operation("-")
-            
             elif event.key == pygame.K_ASTERISK:
                 self.input_operation("×")
-            
             elif event.key == pygame.K_SLASH:
                 self.input_operation("÷")
-            
             elif event.key == pygame.K_EQUALS:
                 self.calculate()
         
@@ -166,17 +154,8 @@ class Calculator:
             self.selected_button = 0
         elif button_text == "√":
             self.square_root()
-        elif button_text == "x²":
-            self.square()
-        elif button_text == "x³":
-            self.cube()
-        elif button_text == "1/x":
-            self.reciprocal()
         elif button_text == "π":
-            self.display = str(math.pi)
-            self.new_input = True
-        elif button_text == "e":
-            self.display = str(math.e)
+            self.display = str(round(math.pi, 8))
             self.new_input = True
         elif button_text == "sin":
             self.trigonometric("sin")
@@ -261,7 +240,12 @@ class Calculator:
             if len(self.history) > 10:
                 self.history.pop(0)
             
-            self.display = str(result)
+            # Format result
+            if result == int(result):
+                self.display = str(int(result))
+            else:
+                self.display = str(round(result, 8))
+            
             self.operation = None
             self.new_input = True
             self.decimal_entered = False
@@ -296,44 +280,7 @@ class Calculator:
                 self.error = True
             else:
                 result = math.sqrt(value)
-                self.display = str(result)
-                self.new_input = True
-        except:
-            self.display = "Error"
-            self.error = True
-    
-    def square(self):
-        """Square function"""
-        try:
-            value = float(self.display)
-            result = value ** 2
-            self.display = str(result)
-            self.new_input = True
-        except:
-            self.display = "Error"
-            self.error = True
-    
-    def cube(self):
-        """Cube function"""
-        try:
-            value = float(self.display)
-            result = value ** 3
-            self.display = str(result)
-            self.new_input = True
-        except:
-            self.display = "Error"
-            self.error = True
-    
-    def reciprocal(self):
-        """Reciprocal function"""
-        try:
-            value = float(self.display)
-            if value == 0:
-                self.display = "Error"
-                self.error = True
-            else:
-                result = 1 / value
-                self.display = str(result)
+                self.display = str(round(result, 8))
                 self.new_input = True
         except:
             self.display = "Error"
@@ -352,7 +299,7 @@ class Calculator:
             elif func == "tan":
                 result = math.tan(radians)
             
-            self.display = str(result)
+            self.display = str(round(result, 8))
             self.new_input = True
         except:
             self.display = "Error"
@@ -367,7 +314,7 @@ class Calculator:
                 self.error = True
             else:
                 result = math.log10(value)
-                self.display = str(result)
+                self.display = str(round(result, 8))
                 self.new_input = True
         except:
             self.display = "Error"
@@ -391,7 +338,7 @@ class Calculator:
         screen.blit(header_surface, (header_x, 5))
         
         # Display
-        display_rect = pygame.Rect(10, 30, SCREEN_WIDTH - 20, 40)
+        display_rect = pygame.Rect(10, 30, SCREEN_WIDTH - 20, 35)
         pygame.draw.rect(screen, BUTTON_COLOR, display_rect)
         pygame.draw.rect(screen, BUTTON_BORDER_COLOR, display_rect, 2)
         
@@ -438,29 +385,23 @@ class Calculator:
                     pygame.draw.rect(screen, border_color, button_rect, 2)
                     
                     # Button text
-                    text_surface = self.os.font_m.render(button_text, True, TEXT_COLOR)
+                    text_surface = self.os.font_s.render(button_text, True, TEXT_COLOR)
                     text_x = button_rect.centerx - text_surface.get_width() // 2
                     text_y = button_rect.centery - text_surface.get_height() // 2
                     screen.blit(text_surface, (text_x, text_y))
         
-        # Controls hint
-        hints = [
-            "ESC: Back",
-            "M: Mode",
-            "Arrow keys: Navigate",
-            "Enter: Press button"
-        ]
-        
-        hint_y = SCREEN_HEIGHT - 40
-        for i, hint in enumerate(hints):
-            if i < 2:  # First row
+        # Show control hints if info is enabled
+        if self.show_info:
+            hints = [
+                "ESC: Back", "M: Mode", "Arrow keys: Navigate", "Enter: Press", "I: Toggle info"
+            ]
+            
+            hint_y = SCREEN_HEIGHT - 40
+            for i, hint in enumerate(hints):
                 hint_surface = self.os.font_tiny.render(hint, True, HIGHLIGHT_COLOR)
-                hint_x = 10 + i * 180
-                screen.blit(hint_surface, (hint_x, hint_y))
-            else:  # Second row
-                hint_surface = self.os.font_tiny.render(hint, True, HIGHLIGHT_COLOR)
-                hint_x = 10 + (i - 2) * 180
-                screen.blit(hint_surface, (hint_x, hint_y + 15))
+                hint_x = 10 + (i % 3) * 125
+                hint_y_pos = hint_y + (i // 3) * 12
+                screen.blit(hint_surface, (hint_x, hint_y_pos))
     
     def save_data(self):
         """Save calculator data"""
