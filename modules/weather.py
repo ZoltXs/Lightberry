@@ -47,7 +47,7 @@ class Weather:
         }
         
         # API configuration
-        self.api_key = os.getenv("WEATHER_API_KEY", "demo_key")
+        self.api_key = os.getenv("9988c1e0e6dc126dc95174b0f05ae93")
         self.api_url = "http://api.openweathermap.org/data/2.5/weather"
         
         # Text input
