@@ -37,8 +37,7 @@ class Settings:
     def init_settings(self):
         """Initialize settings state"""
         self.settings_categories = [
-            "WiFi", "Bluetooth", "Display", "Sound", "Mail Accounts", 
-            "System", "About"
+            "WiFi", "Bluetooth", "Mail Accounts"
         ]
         
         self.selected_category = 0
@@ -73,10 +72,7 @@ class Settings:
         
         # System settings
         self.system_settings = {
-            "auto_brightness": True,
             "screen_timeout": 30,
-            "volume": 50,
-            "notification_sound": True,
             "auto_update": True,
             "debug_mode": False
         }
@@ -577,8 +573,6 @@ class Settings:
             if isinstance(value, int):
                 if key == "screen_timeout":
                     self.system_settings[key] = max(5, min(300, value + direction * 5))
-                elif key == "volume":
-                    self.system_settings[key] = max(0, min(100, value + direction * 5))
                 
                 self.save_settings()
     
@@ -710,7 +704,7 @@ class Settings:
                 
                 # Security indicator
                 if network.get("encrypted", False):
-                    lock_surface = font_s.render("🔒", True, WARNING_COLOR)
+                    lock_surface = font_s.render("[LOCK]", True, WARNING_COLOR)
                     screen.blit(lock_surface, (SCREEN_WIDTH - 40, y_pos))
                 
                 # Signal strength
@@ -943,10 +937,7 @@ class Settings:
         
         # Settings list
         settings_items = [
-            ("Auto Brightness", self.system_settings["auto_brightness"]),
             ("Screen Timeout", f"{self.system_settings['screen_timeout']}s"),
-            ("Volume", f"{self.system_settings['volume']}%"),
-            ("Notification Sound", self.system_settings["notification_sound"]),
             ("Auto Update", self.system_settings["auto_update"]),
             ("Debug Mode", self.system_settings["debug_mode"])
         ]
