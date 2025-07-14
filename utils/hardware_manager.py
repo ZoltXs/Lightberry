@@ -1,3 +1,4 @@
+cat hardware_manager.py
 """
 Hardware integration manager for LightBerry OS
 Real hardware control for WiFi, Bluetooth, and system operations
@@ -19,8 +20,8 @@ class HardwareManager:
     def scan_wifi_networks(self):
         """Scan for available WiFi networks"""
         try:
-            # Use iwlist to scan for networks
-            result = subprocess.run(['iwlist', self.wifi_interface, 'scan'], 
+            # Use sudo iwlist to scan for networks (better results)
+            result = subprocess.run(['sudo', 'iwlist', self.wifi_interface, 'scan'], 
                                   capture_output=True, text=True)
             
             networks = []
@@ -31,35 +32,80 @@ class HardwareManager:
                 for line in lines:
                     line = line.strip()
                     
+                    # New cell (network) starts
+                    if line.startswith('Cell') and current_network:
+                        # Save previous network
+                        if 'name' in current_network:
+                            networks.append(current_network)
+                        current_network = {}
+                    
+                    # Extract network name (ESSID)
                     if 'ESSID:' in line:
-                        essid = line.split('ESSID:')[1].strip('"')
-                        if essid and essid != '<hidden>':
-                            current_network['name'] = essid
+                        essid_match = re.search(r'ESSID:"([^"]*)"', line)
+                        if essid_match:
+                            essid = essid_match.group(1)
+                            if essid and essid != '<hidden>':
+                                current_network['name'] = essid
                     
+                    # Extract signal quality
                     elif 'Quality=' in line:
-                        quality_match = re.search(r'Quality=(\d+/\d+)', line)
+                        quality_match = re.search(r'Quality=(\d+)/(\d+)', line)
                         if quality_match:
-                            quality = quality_match.group(1)
-                            current_network['quality'] = quality
+                            quality_num = int(quality_match.group(1))
+                            quality_max = int(quality_match.group(2))
+                            quality_percent = int((quality_num / quality_max) * 100)
+                            current_network['quality'] = f"{quality_percent}%"
+                        
+                        # Also extract signal level
+                        signal_match = re.search(r'Signal level=(-?\d+)', line)
+                        if signal_match:
+                            signal_level = int(signal_match.group(1))
+                            current_network['signal_level'] = signal_level
                     
+                    # Extract encryption status
                     elif 'Encryption key:' in line:
                         encrypted = 'on' in line
                         current_network['encrypted'] = encrypted
                     
-                    elif 'IE: WPA' in line:
+                    # Extract security type
+                    elif 'IE: WPA Version 1' in line:
                         current_network['security'] = 'WPA'
-                    
                     elif 'IE: WPA2' in line:
                         current_network['security'] = 'WPA2'
-                    
-                    elif line.startswith('Cell') and current_network:
-                        if 'name' in current_network:
-                            networks.append(current_network)
-                        current_network = {}
+                    elif 'IE: WPA3' in line:
+                        current_network['security'] = 'WPA3'
                 
                 # Add last network
                 if current_network and 'name' in current_network:
                     networks.append(current_network)
+                
+                # Remove duplicates based on name
+                seen = set()
+                unique_networks = []
+                for network in networks:
+                    if network['name'] not in seen:
+                        seen.add(network['name'])
+                        unique_networks.append(network)
+                
+                networks = unique_networks
+            
+            else:
+                # Fallback to regular iwlist (without sudo)
+                result = subprocess.run(['iwlist', self.wifi_interface, 'scan'], 
+                                      capture_output=True, text=True)
+                
+                if result.returncode == 0:
+                    # Simple extraction for fallback
+                    essid_matches = re.findall(r'ESSID:"([^"]*)"', result.stdout)
+                    networks = []
+                    for essid in essid_matches:
+                        if essid and essid != '<hidden>':
+                            networks.append({
+                                'name': essid,
+                                'encrypted': True,  # Assume encrypted for safety
+                                'quality': 'Unknown',
+                                'security': 'Unknown'
+                            })
             
             self.wifi_networks = networks
             return networks
@@ -71,8 +117,16 @@ class HardwareManager:
     def connect_wifi(self, ssid, password, security='WPA2'):
         """Connect to WiFi network"""
         try:
+            # Kill existing wpa_supplicant processes
+            subprocess.run(['sudo', 'killall', 'wpa_supplicant'], 
+                         capture_output=True, text=True)
+            
             # Create wpa_supplicant configuration
             config_content = f"""
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+country=US
+
 network={{
     ssid="{ssid}"
     psk="{password}"
@@ -80,22 +134,27 @@ network={{
 }}
 """
             
-            # Write temporary config
+            # Write configuration to proper location
+            config_path = '/etc/wpa_supplicant/wpa_supplicant.conf'
             with open('/tmp/wpa_temp.conf', 'w') as f:
                 f.write(config_content)
             
-            # Connect using wpa_supplicant
+            # Copy to proper location with sudo
+            subprocess.run(['sudo', 'cp', '/tmp/wpa_temp.conf', config_path], 
+                         capture_output=True, text=True)
+            
+            # Restart wpa_supplicant
             result = subprocess.run([
-                'wpa_supplicant', '-B', '-i', self.wifi_interface,
-                '-c', '/tmp/wpa_temp.conf'
+                'sudo', 'wpa_supplicant', '-B', '-i', self.wifi_interface,
+                '-c', config_path
             ], capture_output=True, text=True)
             
             if result.returncode == 0:
                 # Get IP address
-                dhcp_result = subprocess.run(['dhclient', self.wifi_interface], 
+                dhcp_result = subprocess.run(['sudo', 'dhclient', self.wifi_interface], 
                                            capture_output=True, text=True)
                 
-                # Clean up
+                # Clean up temporary file
                 os.remove('/tmp/wpa_temp.conf')
                 
                 return dhcp_result.returncode == 0
@@ -109,9 +168,9 @@ network={{
     def disconnect_wifi(self):
         """Disconnect from WiFi"""
         try:
-            subprocess.run(['killall', 'wpa_supplicant'], 
+            subprocess.run(['sudo', 'killall', 'wpa_supplicant'], 
                          capture_output=True, text=True)
-            subprocess.run(['ip', 'addr', 'flush', 'dev', self.wifi_interface], 
+            subprocess.run(['sudo', 'ip', 'addr', 'flush', 'dev', self.wifi_interface], 
                          capture_output=True, text=True)
             return True
         except Exception as e:
@@ -128,7 +187,7 @@ network={{
                 output = result.stdout
                 if 'ESSID:' in output:
                     essid_match = re.search(r'ESSID:"([^"]*)"', output)
-                    if essid_match:
+                    if essid_match and essid_match.group(1):
                         return {
                             'connected': True,
                             'ssid': essid_match.group(1),
@@ -144,7 +203,7 @@ network={{
     def enable_bluetooth(self):
         """Enable Bluetooth"""
         try:
-            result = subprocess.run(['bluetoothctl', 'power', 'on'], 
+            result = subprocess.run(['sudo', 'bluetoothctl', 'power', 'on'], 
                                   capture_output=True, text=True)
             self.bluetooth_enabled = result.returncode == 0
             return self.bluetooth_enabled
@@ -155,7 +214,7 @@ network={{
     def disable_bluetooth(self):
         """Disable Bluetooth"""
         try:
-            result = subprocess.run(['bluetoothctl', 'power', 'off'], 
+            result = subprocess.run(['sudo', 'bluetoothctl', 'power', 'off'], 
                                   capture_output=True, text=True)
             self.bluetooth_enabled = result.returncode != 0
             return not self.bluetooth_enabled
@@ -166,16 +225,26 @@ network={{
     def scan_bluetooth_devices(self):
         """Scan for Bluetooth devices"""
         try:
-            # Start scan
-            subprocess.run(['bluetoothctl', 'scan', 'on'], 
+            # Clear previous devices
+            subprocess.run(['sudo', 'bluetoothctl', 'remove', '*'], 
                          capture_output=True, text=True)
             
-            # Wait a moment for scan
+            # Start discoverable and pairable
+            subprocess.run(['sudo', 'bluetoothctl', 'discoverable', 'on'], 
+                         capture_output=True, text=True)
+            subprocess.run(['sudo', 'bluetoothctl', 'pairable', 'on'], 
+                         capture_output=True, text=True)
+            
+            # Start scan
+            subprocess.run(['sudo', 'bluetoothctl', 'scan', 'on'], 
+                         capture_output=True, text=True)
+            
+            # Wait for devices to be discovered
             import time
-            time.sleep(3)
+            time.sleep(5)
             
             # Get devices
-            result = subprocess.run(['bluetoothctl', 'devices'], 
+            result = subprocess.run(['sudo', 'bluetoothctl', 'devices'], 
                                   capture_output=True, text=True)
             
             devices = []
@@ -187,11 +256,11 @@ network={{
                         if len(parts) >= 3:
                             devices.append({
                                 'address': parts[1],
-                                'name': parts[2]
+                                'name': parts[2] if parts[2] else 'Unknown Device'
                             })
             
             # Stop scan
-            subprocess.run(['bluetoothctl', 'scan', 'off'], 
+            subprocess.run(['sudo', 'bluetoothctl', 'scan', 'off'], 
                          capture_output=True, text=True)
             
             self.bluetooth_devices = devices
@@ -205,16 +274,16 @@ network={{
         """Connect to Bluetooth device"""
         try:
             # Pair first
-            pair_result = subprocess.run(['bluetoothctl', 'pair', address], 
+            pair_result = subprocess.run(['sudo', 'bluetoothctl', 'pair', address], 
                                        capture_output=True, text=True)
             
             if pair_result.returncode == 0:
                 # Trust device
-                subprocess.run(['bluetoothctl', 'trust', address], 
+                subprocess.run(['sudo', 'bluetoothctl', 'trust', address], 
                              capture_output=True, text=True)
                 
                 # Connect
-                connect_result = subprocess.run(['bluetoothctl', 'connect', address], 
+                connect_result = subprocess.run(['sudo', 'bluetoothctl', 'connect', address], 
                                               capture_output=True, text=True)
                 
                 return connect_result.returncode == 0
