@@ -1,4 +1,3 @@
-cat hardware_manager.py
 """
 Hardware integration manager for LightBerry OS
 Real hardware control for WiFi, Bluetooth, and system operations
