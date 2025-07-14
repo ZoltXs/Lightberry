@@ -1,6 +1,6 @@
 """
-Enhanced Notes Module for LightBerry OS
-Professional note-taking with priorities, categories, and advanced features
+Notes Module for LightBerry OS
+
 """
 
 import pygame
@@ -361,18 +361,18 @@ class Notes:
                 # Action indicators
                 if note_index == self.selected_index:
                     actions = "E:Edit T:Delete"
-                    action_surface = self.os.font_tiny.render(actions, True, WARNING_COLOR)
+                    action_surface = self.os.font_s.render(actions, True, WARNING_COLOR)
                     screen.blit(action_surface, (SCREEN_WIDTH - 100, note_y + 2))
             
             # Scroll indicators
             if self.scroll_offset > 0:
                 up_text = "↑ More above"
-                up_surface = self.os.font_tiny.render(up_text, True, HIGHLIGHT_COLOR)
+                up_surface = self.os.font_s.render(up_text, True, HIGHLIGHT_COLOR)
                 screen.blit(up_surface, (10, 30))
             
             if self.scroll_offset + self.visible_items < len(self.notes):
                 down_text = "↓ More below"
-                down_surface = self.os.font_tiny.render(down_text, True, HIGHLIGHT_COLOR)
+                down_surface = self.os.font_s.render(down_text, True, HIGHLIGHT_COLOR)
                 screen.blit(down_surface, (10, SCREEN_HEIGHT - 65))
         
         # Controls
@@ -387,10 +387,13 @@ class Notes:
         
         control_y = SCREEN_HEIGHT - 50
         for i, control in enumerate(controls):
-            control_surface = self.os.font_tiny.render(control, True, HIGHLIGHT_COLOR)
+            control_surface = self.os.font_s.render(control, True, HIGHLIGHT_COLOR)
             control_x = 10 + (i % 3) * 125
             control_y_pos = control_y + (i // 3) * 12
             screen.blit(control_surface, (control_x, control_y_pos))
+        
+        # Draw scroll bar
+        self.draw_scroll_bar(screen, len(self.notes), self.visible_items, self.scroll_offset)
     
     def draw_view_mode(self, screen):
         """Draw view mode"""
@@ -430,12 +433,12 @@ class Notes:
         # Scroll indicators
         if self.description_scroll > 0:
             up_text = "↑ More above"
-            up_surface = self.os.font_tiny.render(up_text, True, HIGHLIGHT_COLOR)
+            up_surface = self.os.font_s.render(up_text, True, HIGHLIGHT_COLOR)
             screen.blit(up_surface, (10, 70))
         
         if self.description_scroll + 8 < len(desc_lines):
             down_text = "↓ More below"
-            down_surface = self.os.font_tiny.render(down_text, True, HIGHLIGHT_COLOR)
+            down_surface = self.os.font_s.render(down_text, True, HIGHLIGHT_COLOR)
             screen.blit(down_surface, (10, SCREEN_HEIGHT - 50))
         
         # Controls
@@ -452,6 +455,13 @@ class Notes:
             control_x = 10 + (i % 2) * 180
             control_y_pos = control_y + (i // 2) * 12
             screen.blit(control_surface, (control_x, control_y_pos))
+        
+        # Draw scroll bar for description
+        desc_lines = note["description"].split("\n") if note["description"] else [""]
+        self.draw_scroll_bar(screen, len(desc_lines), 8, self.description_scroll)
+        
+        # Draw scroll bar
+        self.draw_scroll_bar(screen, len(self.notes), self.visible_items, self.scroll_offset)
     
     def draw_edit_mode(self, screen):
         """Draw edit mode"""
@@ -529,27 +539,31 @@ class Notes:
                                                     self.category_colors[self.current_category])
         screen.blit(category_text_surface, (SCREEN_WIDTH // 2 + 10, y_offset + 22))
         
-        # Controls
-        controls = [
-            "Tab: Next field",
-            "↑↓: Navigate/Change",
-            "Enter: Save",
-            "ESC: Cancel"
-        ]
+        # Controls removed from edit mode
+    
+    def draw_scroll_bar(self, screen, total_items, visible_items, current_offset):
+        """Draw a visual scroll bar"""
+        if total_items <= visible_items:
+            return
+            
+        # Calculate scroll bar dimensions
+        bar_height = max(20, int((SCREEN_HEIGHT - 100) * (visible_items / total_items)))
+        bar_start = 50 + int(((SCREEN_HEIGHT - 150) * current_offset) / max(1, total_items - visible_items))
         
-        control_y = SCREEN_HEIGHT - 35
-        for i, control in enumerate(controls):
-            control_surface = self.os.font_tiny.render(control, True, HIGHLIGHT_COLOR)
-            control_x = 10 + (i % 2) * 180
-            control_y_pos = control_y + (i // 2) * 12
-            screen.blit(control_surface, (control_x, control_y_pos))
-    
-    def save_data(self):
-        """Save notes data"""
-        return {
-            "notes": self.notes
-        }
-    
+        # Draw scroll track
+        track_rect = pygame.Rect(SCREEN_WIDTH - 15, 50, 8, SCREEN_HEIGHT - 100)
+        pygame.draw.rect(screen, BUTTON_COLOR, track_rect)
+        
+        # Draw scroll thumb
+        thumb_rect = pygame.Rect(SCREEN_WIDTH - 14, bar_start, 6, bar_height)
+        pygame.draw.rect(screen, HIGHLIGHT_COLOR, thumb_rect)
+
+        def save_data(self):
+            """Save notes data"""
+            return {
+                "notes": self.notes
+            }
+        
     def load_data(self, data):
         """Load notes data"""
         self.notes = data.get("notes", [])
