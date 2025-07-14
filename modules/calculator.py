@@ -1,11 +1,18 @@
 """
-Enhanced Calculator Module for LightBerry OS
-Optimized for 400x240 screen resolution
+Calculator Module for LightBerry OS
 """
 
 import pygame
 import math
 from config.constants import *
+# BlackBerry keyboard support (Alt + key combinations)
+BLACKBERRY_KEYS = {
+    pygame.K_w: '1', pygame.K_e: '2', pygame.K_r: '3',
+    pygame.K_s: '4', pygame.K_d: '5', pygame.K_f: '6',
+    pygame.K_z: '7', pygame.K_x: '8', pygame.K_c: '9',
+    pygame.K_v: '0'  # Assuming microphone key is mapped to V
+}
+
 
 class Calculator:
     def __init__(self, os_instance):
@@ -70,10 +77,19 @@ class Calculator:
         self.rows = len(self.buttons)
         self.cols = len(self.buttons[0]) if self.buttons else 0
         
-        # Calculate button dimensions for 400x240 screen
-        self.button_width = (SCREEN_WIDTH - 20) // self.cols
-        self.button_height = 22  # Reduced height to fit on screen
-        self.grid_start_y = 70  # Reduced start position
+        # Calculate button dimensions based on mode
+        if self.advanced_mode:
+            # Advanced mode: one square wider than before
+            display_width = 400  # Increased width
+            self.button_width = (display_width - 20) // self.cols
+            self.button_height = 18  # Smaller for advanced mode
+            self.grid_start_y = 80
+        else:
+            # Basic mode: larger size (400x240)
+            display_width = 400
+            self.button_width = (display_width - 20) // self.cols
+            self.button_height = 28  # Larger for basic mode
+            self.grid_start_y = 70
     
     def handle_events(self, event):
         """Handle calculator events"""
@@ -117,6 +133,9 @@ class Calculator:
                 self.input_operation("÷")
             elif event.key == pygame.K_EQUALS:
                 self.calculate()
+            elif event.key in BLACKBERRY_KEYS and (event.mod & pygame.KMOD_ALT):
+                number = BLACKBERRY_KEYS[event.key]
+                self.input_number(number)
         
         return None
     
@@ -338,7 +357,8 @@ class Calculator:
         screen.blit(header_surface, (header_x, 5))
         
         # Display
-        display_rect = pygame.Rect(10, 30, SCREEN_WIDTH - 20, 35)
+        display_width = 400  # Both modes use 400 width now
+        display_rect = pygame.Rect(10, 30, display_width - 20, 35)
         pygame.draw.rect(screen, BUTTON_COLOR, display_rect)
         pygame.draw.rect(screen, BUTTON_BORDER_COLOR, display_rect, 2)
         
@@ -390,26 +410,8 @@ class Calculator:
                     text_y = button_rect.centery - text_surface.get_height() // 2
                     screen.blit(text_surface, (text_x, text_y))
         
-        # Show control hints if info is enabled
-        if self.show_info:
-            hints = [
-                "ESC: Back", "M: Mode", "Arrow keys: Navigate", "Enter: Press", "I: Toggle info"
-            ]
-            
-            hint_y = SCREEN_HEIGHT - 40
-            for i, hint in enumerate(hints):
-                hint_surface = self.os.font_tiny.render(hint, True, HIGHLIGHT_COLOR)
-                hint_x = 10 + (i % 3) * 125
-                hint_y_pos = hint_y + (i // 3) * 12
-                screen.blit(hint_surface, (hint_x, hint_y_pos))
+        # Info display removed - h key disabled
     
-    def save_data(self):
-        """Save calculator data"""
-        return {
-            "history": self.history,
-            "memory": self.memory,
-            "advanced_mode": self.advanced_mode
-        }
     
     def load_data(self, data):
         """Load calculator data"""
