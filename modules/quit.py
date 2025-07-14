@@ -188,13 +188,24 @@ class Quit:
         self.status_color = ACCENT_COLOR
         
         # Save all data before exit
-        if self.os and hasattr(self.os, 'save_data'):
+        if self.os and hasattr(self.os, "save_data"):
             self.os.save_data()
+        
+        # Show exit message
+        print("\n" + "="*50)
+        print("To return to LightBerry, run the command: startx")
+        print("="*50 + "\n")
         
         # Clean exit
         pygame.quit()
+        
+        # Kill X server to return to terminal
+        try:
+            subprocess.run(["pkill", "X"], check=False)
+        except Exception as e:
+            print(f"Error killing X server: {e}")
+        
         sys.exit(0)
-
     def update(self):
         """Update quit module state"""
         # Update animation
