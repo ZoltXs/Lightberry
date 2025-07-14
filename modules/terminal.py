@@ -1,61 +1,187 @@
 """
-Enhanced Terminal Module for LightBerry OS
-Professional terminal emulator with command execution and improved UI
+Terminal Module for LightBerry OS
 """
 
 import pygame
 import subprocess
 import os
 import threading
+import time
 from config.constants import *
 
 class Terminal:
     def __init__(self, os_instance):
         self.os = os_instance
         self.init_terminal()
-    
+
     def init_terminal(self):
         """Initialize terminal state"""
-        self.command_history = []
-        self.current_command = ""
-        self.output_lines = []
-        self.scroll_offset = 0
-        self.max_history = 100
-        self.max_output_lines = 1000
-        self.visible_lines = 10
-        
-        # Cursor
+        self.screen_buffer = []
+        self.input_buffer = ""
         self.cursor_visible = True
         self.cursor_timer = 0
+        self.cursor_blink_rate = 30
+        self.scroll_offset = 0
         
-        # Working directory
-        self.current_dir = os.getcwd()
+        # Terminal settings optimized for 400x240 with larger font
+        self.max_lines = 200
+        self.visible_lines = 12  # More lines for better visibility
+        self.max_input_length = 40  # Adjusted for larger font
         
-        # Add welcome message
-        self.output_lines.append("LightBerry OS Terminal")
-        self.output_lines.append("Type 'help' for available commands")
-        self.output_lines.append("")
+        # Colors
+        self.bg_color = (0, 0, 0)
+        self.fg_color = (0, 255, 0)  # Green like classic terminals
+        self.cursor_color = (255, 255, 255)
+        self.prompt_color = (255, 255, 0)  # Yellow for prompt
         
-        # Built-in commands
-        self.builtin_commands = {
-            "help": self.cmd_help,
-            "clear": self.cmd_clear,
-            "pwd": self.cmd_pwd,
-            "cd": self.cmd_cd,
-            "ls": self.cmd_ls,
-            "cat": self.cmd_cat,
-            "echo": self.cmd_echo,
-            "date": self.cmd_date,
-            "whoami": self.cmd_whoami,
-            "uname": self.cmd_uname,
-            "df": self.cmd_df,
-            "free": self.cmd_free,
-            "ps": self.cmd_ps,
-            "top": self.cmd_top,
-            "history": self.cmd_history,
-            "exit": self.cmd_exit
-        }
-    
+        # Terminal state
+        self.command_history = []
+        self.history_index = -1
+        self.current_directory = os.getcwd()
+        
+        # Welcome message
+        self.add_output_line("LightBerry Terminal v1.0")
+        self.add_output_line("Type 'help' for available commands")
+        self.add_output_line("")
+
+    def add_output_line(self, line):
+        """Add a line to the terminal output"""
+        if len(line) > self.max_input_length:
+            # Split long lines
+            while len(line) > self.max_input_length:
+                self.screen_buffer.append(line[:self.max_input_length])
+                line = line[self.max_input_length:]
+        
+        if line:
+            self.screen_buffer.append(line)
+        
+        # Keep buffer size manageable
+        if len(self.screen_buffer) > self.max_lines:
+            self.screen_buffer = self.screen_buffer[-self.max_lines:]
+        
+        # Auto-scroll to bottom
+        self.scroll_to_bottom()
+
+    def get_prompt(self):
+        """Get the command prompt"""
+        username = os.getenv('USER', 'pi')
+        hostname = os.getenv('HOSTNAME', 'raspberry')
+        current_dir = os.path.basename(self.current_directory) or '/'
+        return f"{username}@{hostname}:{current_dir}$ "
+
+    def scroll_to_bottom(self):
+        """Scroll to the bottom"""
+        self.scroll_offset = max(0, len(self.screen_buffer) - self.visible_lines + 1)
+
+    def scroll_up(self):
+        """Scroll up"""
+        if self.scroll_offset > 0:
+            self.scroll_offset -= 1
+
+    def scroll_down(self):
+        """Scroll down"""
+        max_scroll = max(0, len(self.screen_buffer) - self.visible_lines + 1)
+        if self.scroll_offset < max_scroll:
+            self.scroll_offset += 1
+
+    def execute_command(self, command):
+        """Execute a command"""
+        if not command.strip():
+            return
+            
+        # Add command to history
+        self.command_history.append(command)
+        self.history_index = len(self.command_history)
+        
+        # Show command being executed
+        self.add_output_line(self.get_prompt() + command)
+        
+        # Handle built-in commands
+        if command.strip() == "help":
+            self.show_help()
+        elif command.strip() == "clear":
+            self.screen_buffer = []
+            self.scroll_offset = 0
+        elif command.strip().startswith("cd "):
+            self.change_directory(command[3:].strip())
+        elif command.strip() == "pwd":
+            self.add_output_line(self.current_directory)
+        elif command.strip() == "exit":
+            return "exit"
+        else:
+            # Execute system command
+            self.execute_system_command(command)
+
+    def show_help(self):
+        """Show help information"""
+        help_text = [
+            "Built-in commands:",
+            "  help     - Show this help",
+            "  clear    - Clear screen",
+            "  pwd      - Show current directory",
+            "  cd <dir> - Change directory",
+            "  exit     - Exit terminal",
+            "",
+            "All other commands are passed to bash.",
+            "Use UP/DOWN arrows for command history.",
+            "Use Ctrl+UP/DOWN to scroll."
+        ]
+        for line in help_text:
+            self.add_output_line(line)
+
+    def change_directory(self, path):
+        """Change directory"""
+        try:
+            if path == "":
+                path = os.path.expanduser("~")
+            elif path.startswith("~"):
+                path = os.path.expanduser(path)
+            
+            new_dir = os.path.abspath(os.path.join(self.current_directory, path))
+            if os.path.isdir(new_dir):
+                self.current_directory = new_dir
+                os.chdir(new_dir)
+            else:
+                self.add_output_line(f"cd: {path}: No such file or directory")
+        except Exception as e:
+            self.add_output_line(f"cd: {e}")
+
+    def execute_system_command(self, command):
+        """Execute a system command"""
+        try:
+            # Change to current directory
+            original_dir = os.getcwd()
+            os.chdir(self.current_directory)
+            
+            # Execute command
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            # Restore directory
+            os.chdir(original_dir)
+            
+            # Show output
+            if result.stdout:
+                for line in result.stdout.splitlines():
+                    self.add_output_line(line)
+            
+            if result.stderr:
+                for line in result.stderr.splitlines():
+                    self.add_output_line(line)
+            
+            if result.returncode != 0 and not result.stdout and not result.stderr:
+                self.add_output_line(f"Command exited with code {result.returncode}")
+                
+        except subprocess.TimeoutExpired:
+            self.add_output_line("Command timed out")
+        except Exception as e:
+            self.add_output_line(f"Error executing command: {e}")
+
     def handle_events(self, event):
         """Handle terminal events"""
         if event.type == pygame.KEYDOWN:
@@ -63,404 +189,143 @@ class Terminal:
                 return "back"
             
             elif event.key == pygame.K_RETURN:
-                self.execute_command()
-            
-            elif event.key == pygame.K_UP:
-                self.scroll_up()
-            
-            elif event.key == pygame.K_DOWN:
-                self.scroll_down()
+                result = self.execute_command(self.input_buffer)
+                self.input_buffer = ""
+                if result == "exit":
+                    return "back"
             
             elif event.key == pygame.K_BACKSPACE:
-                if self.current_command:
-                    self.current_command = self.current_command[:-1]
+                if self.input_buffer:
+                    self.input_buffer = self.input_buffer[:-1]
             
-            elif event.key == pygame.K_TAB:
-                self.tab_completion()
+            elif event.key == pygame.K_UP:
+                if event.mod & pygame.KMOD_CTRL:
+                    self.scroll_up()
+                else:
+                    # Command history
+                    if self.command_history and self.history_index > 0:
+                        self.history_index -= 1
+                        self.input_buffer = self.command_history[self.history_index]
+            
+            elif event.key == pygame.K_DOWN:
+                if event.mod & pygame.KMOD_CTRL:
+                    self.scroll_down()
+                else:
+                    # Command history
+                    if self.command_history and self.history_index < len(self.command_history) - 1:
+                        self.history_index += 1
+                        self.input_buffer = self.command_history[self.history_index]
+                    else:
+                        self.history_index = len(self.command_history)
+                        self.input_buffer = ""
+            
+            elif event.key == pygame.K_c and event.mod & pygame.KMOD_CTRL:
+                # Ctrl+C - Cancel current input
+                self.input_buffer = ""
+                self.add_output_line(self.get_prompt() + self.input_buffer + "^C")
+            
+            elif event.key == pygame.K_l and event.mod & pygame.KMOD_CTRL:
+                # Ctrl+L - Clear screen
+                self.screen_buffer = []
+                self.scroll_offset = 0
             
             else:
+                # Regular character input
                 char = event.unicode
-                if char.isprintable():
-                    self.current_command += char
+                if char and char.isprintable() and len(self.input_buffer) < self.max_input_length:
+                    self.input_buffer += char
         
         return None
-    
-    def execute_command(self):
-        """Execute the current command"""
-        if not self.current_command.strip():
-            return
-        
-        # Add command to history
-        self.command_history.append(self.current_command)
-        if len(self.command_history) > self.max_history:
-            self.command_history.pop(0)
-        
-        # Display command
-        prompt = f"{os.path.basename(self.current_dir)}$ {self.current_command}"
-        self.output_lines.append(prompt)
-        
-        # Parse command
-        parts = self.current_command.strip().split()
-        if not parts:
-            self.current_command = ""
-            return
-        
-        command = parts[0]
-        args = parts[1:]
-        
-        # Execute command
-        if command in self.builtin_commands:
-            self.builtin_commands[command](args)
-        else:
-            self.execute_system_command(command, args)
-        
-        # Clear current command
-        self.current_command = ""
-        
-        # Limit output lines
-        if len(self.output_lines) > self.max_output_lines:
-            self.output_lines = self.output_lines[-self.max_output_lines:]
-        
-        # Auto-scroll to bottom
-        self.scroll_offset = max(0, len(self.output_lines) - self.visible_lines)
-    
-    def execute_system_command(self, command, args):
-        """Execute system command"""
-        try:
-            full_command = [command] + args
-            result = subprocess.run(full_command, 
-                                  capture_output=True, 
-                                  text=True, 
-                                  cwd=self.current_dir,
-                                  timeout=30)
-            
-            if result.stdout:
-                self.output_lines.extend(result.stdout.split('\n'))
-            
-            if result.stderr:
-                self.output_lines.extend([f"Error: {line}" for line in result.stderr.split('\n')])
-            
-            if result.returncode != 0:
-                self.output_lines.append(f"Command exited with code {result.returncode}")
-        
-        except subprocess.TimeoutExpired:
-            self.output_lines.append("Command timed out")
-        
-        except FileNotFoundError:
-            self.output_lines.append(f"Command not found: {command}")
-        
-        except Exception as e:
-            self.output_lines.append(f"Error executing command: {e}")
-    
-    def scroll_up(self):
-        """Scroll output up"""
-        self.scroll_offset = max(0, self.scroll_offset - 1)
-    
-    def scroll_down(self):
-        """Scroll output down"""
-        max_scroll = max(0, len(self.output_lines) - self.visible_lines)
-        self.scroll_offset = min(max_scroll, self.scroll_offset + 1)
-    
-    def tab_completion(self):
-        """Simple tab completion"""
-        if not self.current_command:
-            return
-        
-        # Get available commands
-        available_commands = list(self.builtin_commands.keys())
-        
-        # Add system commands in PATH
-        try:
-            path_commands = []
-            for path in os.environ.get('PATH', '').split(':'):
-                if os.path.isdir(path):
-                    for file in os.listdir(path):
-                        if os.access(os.path.join(path, file), os.X_OK):
-                            path_commands.append(file)
-            
-            available_commands.extend(path_commands)
-        except:
-            pass
-        
-        # Find matches
-        matches = [cmd for cmd in available_commands if cmd.startswith(self.current_command)]
-        
-        if len(matches) == 1:
-            self.current_command = matches[0]
-        elif len(matches) > 1:
-            self.output_lines.append(f"Matches: {', '.join(matches[:10])}")
-    
-    # Built-in commands
-    def cmd_help(self, args):
-        """Show help"""
-        help_text = [
-            "Available commands:",
-            "  help     - Show this help",
-            "  clear    - Clear screen",
-            "  pwd      - Show current directory",
-            "  cd       - Change directory",
-            "  ls       - List directory contents",
-            "  cat      - Display file contents",
-            "  echo     - Echo text",
-            "  date     - Show current date/time",
-            "  whoami   - Show current user",
-            "  uname    - Show system info",
-            "  df       - Show disk usage",
-            "  free     - Show memory usage",
-            "  ps       - Show processes",
-            "  history  - Show command history",
-            "  exit     - Exit terminal",
-            "",
-            "Use arrow keys to scroll, Tab for completion"
-        ]
-        self.output_lines.extend(help_text)
-    
-    def cmd_clear(self, args):
-        """Clear screen"""
-        self.output_lines = []
-        self.scroll_offset = 0
-    
-    def cmd_pwd(self, args):
-        """Show current directory"""
-        self.output_lines.append(self.current_dir)
-    
-    def cmd_cd(self, args):
-        """Change directory"""
-        if not args:
-            new_dir = os.path.expanduser("~")
-        else:
-            new_dir = args[0]
-        
-        try:
-            if not os.path.isabs(new_dir):
-                new_dir = os.path.join(self.current_dir, new_dir)
-            
-            new_dir = os.path.abspath(new_dir)
-            
-            if os.path.isdir(new_dir):
-                self.current_dir = new_dir
-                os.chdir(new_dir)
-            else:
-                self.output_lines.append(f"cd: {new_dir}: No such directory")
-        
-        except Exception as e:
-            self.output_lines.append(f"cd: {e}")
-    
-    def cmd_ls(self, args):
-        """List directory contents"""
-        try:
-            target_dir = args[0] if args else self.current_dir
-            
-            if not os.path.isabs(target_dir):
-                target_dir = os.path.join(self.current_dir, target_dir)
-            
-            items = os.listdir(target_dir)
-            items.sort()
-            
-            for item in items:
-                item_path = os.path.join(target_dir, item)
-                if os.path.isdir(item_path):
-                    self.output_lines.append(f"{item}/")
-                else:
-                    self.output_lines.append(item)
-        
-        except Exception as e:
-            self.output_lines.append(f"ls: {e}")
-    
-    def cmd_cat(self, args):
-        """Display file contents"""
-        if not args:
-            self.output_lines.append("cat: missing filename")
-            return
-        
-        try:
-            filename = args[0]
-            
-            if not os.path.isabs(filename):
-                filename = os.path.join(self.current_dir, filename)
-            
-            with open(filename, 'r') as f:
-                content = f.read()
-                self.output_lines.extend(content.split('\n'))
-        
-        except Exception as e:
-            self.output_lines.append(f"cat: {e}")
-    
-    def cmd_echo(self, args):
-        """Echo text"""
-        self.output_lines.append(' '.join(args))
-    
-    def cmd_date(self, args):
-        """Show current date/time"""
-        from datetime import datetime
-        self.output_lines.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    
-    def cmd_whoami(self, args):
-        """Show current user"""
-        self.output_lines.append(os.getenv('USER', 'lightberry'))
-    
-    def cmd_uname(self, args):
-        """Show system info"""
-        import platform
-        self.output_lines.append(f"{platform.system()} {platform.release()}")
-    
-    def cmd_df(self, args):
-        """Show disk usage"""
-        try:
-            result = subprocess.run(['df', '-h'], capture_output=True, text=True)
-            if result.stdout:
-                self.output_lines.extend(result.stdout.split('\n'))
-        except:
-            self.output_lines.append("df: command not available")
-    
-    def cmd_free(self, args):
-        """Show memory usage"""
-        try:
-            result = subprocess.run(['free', '-h'], capture_output=True, text=True)
-            if result.stdout:
-                self.output_lines.extend(result.stdout.split('\n'))
-        except:
-            self.output_lines.append("free: command not available")
-    
-    def cmd_ps(self, args):
-        """Show processes"""
-        try:
-            result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
-            if result.stdout:
-                lines = result.stdout.split('\n')[:20]  # Limit to first 20 lines
-                self.output_lines.extend(lines)
-        except:
-            self.output_lines.append("ps: command not available")
-    
-    def cmd_top(self, args):
-        """Show top processes"""
-        try:
-            result = subprocess.run(['top', '-b', '-n', '1'], capture_output=True, text=True)
-            if result.stdout:
-                lines = result.stdout.split('\n')[:15]  # Limit to first 15 lines
-                self.output_lines.extend(lines)
-        except:
-            self.output_lines.append("top: command not available")
-    
-    def cmd_history(self, args):
-        """Show command history"""
-        for i, cmd in enumerate(self.command_history[-20:], 1):
-            self.output_lines.append(f"{i:3d}  {cmd}")
-    
-    def cmd_exit(self, args):
-        """Exit terminal"""
-        self.output_lines.append("Goodbye!")
-        # Could signal to parent to exit
-    
+
     def update(self):
         """Update terminal state"""
-        # Update cursor
+        # Update cursor blinking
         self.cursor_timer += 1
-        if self.cursor_timer >= 30:
+        if self.cursor_timer >= self.cursor_blink_rate:
             self.cursor_visible = not self.cursor_visible
             self.cursor_timer = 0
-    
+
     def draw(self, screen):
-        """Draw terminal interface"""
+        """Draw terminal interface with traditional layout"""
+        # Clear screen
+        screen.fill(self.bg_color)
+        
         # Header
-        header_text = "Terminal"
-        header_surface = self.os.font_l.render(header_text, True, ACCENT_COLOR)
+        header_text = "LightBerry Terminal"
+        header_surface = self.os.font_s.render(header_text, True, ACCENT_COLOR)
         header_x = SCREEN_WIDTH // 2 - header_surface.get_width() // 2
-        screen.blit(header_surface, (header_x, 5))
+        screen.blit(header_surface, (header_x, 2))
         
-        # Terminal background
-        terminal_rect = pygame.Rect(5, 25, SCREEN_WIDTH - 10, SCREEN_HEIGHT - 75)
-        pygame.draw.rect(screen, (10, 10, 10), terminal_rect)
-        pygame.draw.rect(screen, BUTTON_BORDER_COLOR, terminal_rect, 2)
+        # Terminal window
+        terminal_rect = pygame.Rect(2, 18, SCREEN_WIDTH - 4, SCREEN_HEIGHT - 35)
+        pygame.draw.rect(screen, self.bg_color, terminal_rect)
+        pygame.draw.rect(screen, HIGHLIGHT_COLOR, terminal_rect, 1)
         
-        # Output lines
-        line_height = 16
-        start_y = 30
+        # Use larger font (font_s instead of font_tiny)
+        line_height = 16  # Increased line height for larger font
+        start_y = 22
         
-        visible_lines = self.output_lines[self.scroll_offset:self.scroll_offset + self.visible_lines]
-        
-        for i, line in enumerate(visible_lines):
-            if not line:
-                continue
-            
-            y_pos = start_y + i * line_height
-            
-            # Truncate long lines
-            if len(line) > 50:
-                line = line[:50] + "..."
-            
-            # Color coding
-            if line.startswith("Error:"):
-                color = ERROR_COLOR
-            elif line.endswith("$"):
-                color = SUCCESS_COLOR
-            else:
-                color = TEXT_COLOR
-            
-            line_surface = self.os.font_m.render(line, True, color)
-            screen.blit(line_surface, (10, y_pos))
-        
-        # Scroll indicators
-        if self.scroll_offset > 0:
-            up_text = "↑ More above"
-            up_surface = self.os.font_tiny.render(up_text, True, HIGHLIGHT_COLOR)
-            screen.blit(up_surface, (SCREEN_WIDTH - 100, 30))
-        
-        if self.scroll_offset + self.visible_lines < len(self.output_lines):
-            down_text = "↓ More below"
-            down_surface = self.os.font_tiny.render(down_text, True, HIGHLIGHT_COLOR)
-            screen.blit(down_surface, (SCREEN_WIDTH - 100, start_y + self.visible_lines * line_height))
-        
-        # Command input area (moved to top)
-        input_y = SCREEN_HEIGHT - 45
-        input_rect = pygame.Rect(5, input_y, SCREEN_WIDTH - 10, 25)
-        pygame.draw.rect(screen, BUTTON_COLOR, input_rect)
-        pygame.draw.rect(screen, BUTTON_BORDER_COLOR, input_rect, 2)
-        
-        # Prompt
-        prompt_text = f"{os.path.basename(self.current_dir)}$ "
-        prompt_surface = self.os.font_m.render(prompt_text, True, SUCCESS_COLOR)
-        screen.blit(prompt_surface, (10, input_y + 3))
-        
-        # Current command
-        command_x = 10 + prompt_surface.get_width()
-        command_text = self.current_command
+        # Draw input line at the top (traditional terminal style)
+        current_input = self.get_prompt() + self.input_buffer
         
         # Add cursor
         if self.cursor_visible:
-            command_text += "|"
+            current_input += "_"
         
-        command_surface = self.os.font_m.render(command_text, True, TEXT_COLOR)
-        screen.blit(command_surface, (command_x, input_y + 3))
+        # Truncate if too long
+        if len(current_input) > self.max_input_length:
+            current_input = "..." + current_input[-(self.max_input_length-3):]
         
-        # Controls
-        controls = [
-            "Type: Enter command",
-            "Enter: Execute",
-            "↑↓: Scroll output",
-            "Tab: Completion",
-            "ESC: Back"
-        ]
+        input_surface = self.os.font_s.render(current_input, True, self.prompt_color)
+        screen.blit(input_surface, (5, start_y))
         
-        control_y = SCREEN_HEIGHT - 15
-        for i, control in enumerate(controls):
-            control_surface = self.os.font_tiny.render(control, True, HIGHLIGHT_COLOR)
-            control_x = 10 + (i % 3) * 125
-            control_y_pos = control_y + (i // 3) * 10
-            screen.blit(control_surface, (control_x, control_y_pos))
-    
+        # Draw separator line
+        separator_y = start_y + line_height + 2
+        pygame.draw.line(screen, HIGHLIGHT_COLOR, (5, separator_y), (SCREEN_WIDTH - 7, separator_y), 1)
+        
+        # Draw terminal content below input (traditional layout)
+        content_start_y = separator_y + 5
+        
+        # Calculate visible lines (reduced due to input at top)
+        available_height = SCREEN_HEIGHT - content_start_y - 25
+        visible_lines = min(available_height // line_height, len(self.screen_buffer))
+        
+        # Calculate visible range
+        visible_start = max(0, len(self.screen_buffer) - visible_lines)
+        visible_end = len(self.screen_buffer)
+        
+        # Draw terminal output
+        for i in range(visible_start, visible_end):
+            line = self.screen_buffer[i]
+            y_pos = content_start_y + (i - visible_start) * line_height
+            
+            # Draw line with larger font
+            if line:
+                line_surface = self.os.font_s.render(line, True, self.fg_color)
+                screen.blit(line_surface, (5, y_pos))
+        
+        # Controls at bottom
+        control_y = SCREEN_HEIGHT - 18
+        controls_text = "ESC:Exit | Enter:Execute | Ctrl+L:Clear | ↑↓:History"
+        control_surface = self.os.font_tiny.render(controls_text, True, HIGHLIGHT_COLOR)
+        screen.blit(control_surface, (2, control_y))
+
     def save_data(self):
         """Save terminal data"""
         return {
-            "command_history": self.command_history[-50:],  # Save last 50 commands
-            "current_dir": self.current_dir
+            "command_history": self.command_history[-50:],  # Keep last 50 commands
+            "current_directory": self.current_directory
         }
-    
+
     def load_data(self, data):
         """Load terminal data"""
-        self.command_history = data.get("command_history", [])
-        self.current_dir = data.get("current_dir", os.getcwd())
-        try:
-            os.chdir(self.current_dir)
-        except:
-            self.current_dir = os.getcwd()
+        if "command_history" in data:
+            self.command_history = data["command_history"]
+        if "current_directory" in data:
+            self.current_directory = data["current_directory"]
+            try:
+                os.chdir(self.current_directory)
+            except:
+                self.current_directory = os.getcwd()
+        
+        self.history_index = len(self.command_history)
