@@ -1,12 +1,14 @@
+
 """
-Enhanced Weather Module for LightBerry OS
-Professional weather display with real API integration and scrolling
+Enhanced Weather Module with Beautiful Animations for LightBerry OS
 """
 
 import pygame
-import requests
+import subprocess
 import json
 import os
+import math
+import random
 from datetime import datetime, timedelta
 from config.constants import *
 
@@ -17,460 +19,361 @@ class Weather:
     
     def init_weather(self):
         """Initialize weather state"""
-        self.locations = ["Madrid", "New York", "Tokyo"]
+        self.location = "Madrid"  # Single focused city
         self.weather_data = {}
         self.mode = "view"
-        self.selected_location = 0
-        self.scroll_offset = 0
-        self.location_input = ""
-        self.unit = "celsius"
-        self.last_update = {}
+        self.last_update = datetime.now()
         self.update_interval = 1800  # 30 minutes
         
-        # Weather icons
+        # Animation system
+        self.animation_time = 0
+        self.particles = []
+        self.lightning_flash = 0
+        self.lightning_timer = 0
+        
+        # Weather conditions for testing
+        self.current_condition = "sunny"  # Will be dynamic
+        self.current_temp = 25
+        self.feels_like = 27
+        self.humidity = 60
+        self.wind_speed = 12
+        self.uv_index = 7
+        
+        # Load proper fonts for emoji support
+        self.load_fonts()
+        
+        # Initialize particles based on weather
+        self.init_particles()
+        
+        # Simple weather icons that work on all systems
         self.weather_icons = {
             "clear": "☀", "sunny": "☀", "partly_cloudy": "⛅", "cloudy": "☁",
             "overcast": "☁", "rain": "🌧", "drizzle": "🌦", "showers": "🌦", 
             "thunderstorm": "⛈", "storm": "⛈", "snow": "🌨", "sleet": "🌨",
             "fog": "🌫", "mist": "🌫", "wind": "💨", "hot": "🌡", "cold": "❄",
-            "default": "🌤"
+            "night_clear": "🌙", "night_cloudy": "🌙", "default": "🌥"
         }
         
-        # Weather condition colors
-        self.weather_colors = {
-            "clear": SUNNY_COLOR, "sunny": SUNNY_COLOR, "partly_cloudy": CLOUDY_COLOR,
-            "cloudy": CLOUDY_COLOR, "overcast": CLOUDY_COLOR, "rain": RAINY_COLOR,
-            "drizzle": RAINY_COLOR, "showers": RAINY_COLOR, "thunderstorm": THUNDERSTORM_COLOR,
-            "storm": THUNDERSTORM_COLOR, "snow": SNOWY_COLOR, "sleet": SNOWY_COLOR,
-            "fog": FOGGY_COLOR, "mist": FOGGY_COLOR, "wind": CLOUDY_COLOR,
-            "hot": TEMP_HOT_COLOR, "cold": TEMP_COLD_COLOR, "default": HIGHLIGHT_COLOR
+        # Enhanced color gradients for each weather condition
+        self.weather_gradients = {
+            "sunny": [(255, 215, 0), (255, 165, 0), (255, 140, 0)],
+            "clear": [(135, 206, 250), (173, 216, 230), (240, 248, 255)],
+            "partly_cloudy": [(169, 169, 169), (192, 192, 192), (220, 220, 220)],
+            "cloudy": [(128, 128, 128), (169, 169, 169), (192, 192, 192)],
+            "rain": [(70, 130, 180), (100, 149, 237), (135, 206, 235)],
+            "thunderstorm": [(25, 25, 112), (75, 0, 130), (138, 43, 226)],
+            "snow": [(248, 248, 255), (230, 230, 250), (255, 250, 250)],
+            "fog": [(128, 128, 128), (169, 169, 169), (192, 192, 192)],
+            "night": [(25, 25, 112), (72, 61, 139), (123, 104, 238)]
         }
-        
-        # API configuration
-        self.api_key = os.getenv("9988c1e0e6dc126dc95174b0f05ae93")
-        self.api_url = "http://api.openweathermap.org/data/2.5/weather"
-        
-        # Text input
-        self.text_cursor_visible = True
-        self.text_cursor_timer = 0
-        
-        # Initialize with sample data if no API key
-        if self.api_key == "demo_key":
-            self.generate_sample_data()
-        else:
-            self.fetch_all_weather_data()
     
-    def generate_sample_data(self):
-        """Generate sample weather data for demonstration"""
-        sample_data = {
-            "Madrid": {
-                "temperature": 22,
-                "condition": "sunny",
-                "humidity": 45,
-                "wind_speed": 12,
-                "pressure": 1013,
-                "visibility": 10,
-                "feels_like": 24,
-                "description": "Clear skies",
-                "last_updated": datetime.now().isoformat()
-            },
-            "New York": {
-                "temperature": 18,
-                "condition": "cloudy",
-                "humidity": 60,
-                "wind_speed": 8,
-                "pressure": 1015,
-                "visibility": 8,
-                "feels_like": 16,
-                "description": "Overcast",
-                "last_updated": datetime.now().isoformat()
-            },
-            "Tokyo": {
-                "temperature": 25,
-                "condition": "partly_cloudy",
-                "humidity": 55,
-                "wind_speed": 6,
-                "pressure": 1011,
-                "visibility": 12,
-                "feels_like": 27,
-                "description": "Partly cloudy",
-                "last_updated": datetime.now().isoformat()
-            }
-        }
-        self.weather_data = sample_data
-    
-    def fetch_weather_data(self, location):
-        """Fetch weather data for a specific location"""
-        if self.api_key == "demo_key":
-            return  # Use sample data
-        
+    def load_fonts(self):
+        """Load fonts with emoji support"""
         try:
-            params = {
-                "q": location,
-                "appid": self.api_key,
-                "units": "metric"
-            }
-            
-            response = requests.get(self.api_url, params=params, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Extract relevant data
-                weather_info = {
-                    "temperature": int(data["main"]["temp"]),
-                    "condition": data["weather"][0]["main"].lower(),
-                    "humidity": data["main"]["humidity"],
-                    "wind_speed": int(data["wind"]["speed"] * 3.6),  # Convert to km/h
-                    "pressure": data["main"]["pressure"],
-                    "visibility": data.get("visibility", 0) // 1000,  # Convert to km
-                    "feels_like": int(data["main"]["feels_like"]),
-                    "description": data["weather"][0]["description"].title(),
-                    "last_updated": datetime.now().isoformat()
-                }
-                
-                self.weather_data[location] = weather_info
-                self.last_update[location] = datetime.now()
-                
-        except Exception as e:
-            print(f"Error fetching weather data for {location}: {e}")
-    
-    def fetch_all_weather_data(self):
-        """Fetch weather data for all locations"""
-        for location in self.locations:
-            self.fetch_weather_data(location)
-    
-    def should_update_weather(self, location):
-        """Check if weather data should be updated"""
-        if location not in self.last_update:
-            return True
+            # Try to use system fonts with emoji support
+            self.emoji_font = pygame.font.SysFont('dejavusans', 48)
+            if not self.emoji_font:
+                self.emoji_font = pygame.font.SysFont('symbola', 48)
+            if not self.emoji_font:
+                self.emoji_font = pygame.font.Font(None, 48)
+        except:
+            self.emoji_font = pygame.font.Font(None, 48)
         
-        time_since_update = datetime.now() - self.last_update[location]
-        return time_since_update.total_seconds() > self.update_interval
+        # Test emoji rendering
+        try:
+            test_surface = self.emoji_font.render("☀", True, (255, 255, 255))
+            print("✓ Emoji font loaded successfully")
+        except:
+            print("✗ Emoji font loading failed, using fallback")
     
-    def update_weather_data(self):
-        """Update weather data if needed"""
-        for location in self.locations:
-            if self.should_update_weather(location):
-                self.fetch_weather_data(location)
+    def init_particles(self):
+        """Initialize particles based on current weather"""
+        self.particles = []
+        
+        if self.current_condition in ["rain", "drizzle", "showers"]:
+            # Rain particles
+            for _ in range(80):
+                self.particles.append({
+                    'type': 'rain',
+                    'x': random.randint(0, SCREEN_WIDTH),
+                    'y': random.randint(-SCREEN_HEIGHT, 0),
+                    'speed': random.uniform(3, 7),
+                    'length': random.randint(8, 15)
+                })
+        
+        elif self.current_condition in ["snow", "sleet"]:
+            # Snow particles
+            for _ in range(60):
+                self.particles.append({
+                    'type': 'snow',
+                    'x': random.randint(0, SCREEN_WIDTH),
+                    'y': random.randint(-SCREEN_HEIGHT, 0),
+                    'speed': random.uniform(1, 3),
+                    'size': random.randint(2, 4),
+                    'drift': random.uniform(-0.5, 0.5)
+                })
+        
+        elif self.is_night() and self.current_condition in ["clear", "partly_cloudy"]:
+            # Stars for night
+            for _ in range(25):
+                self.particles.append({
+                    'type': 'star',
+                    'x': random.randint(0, SCREEN_WIDTH),
+                    'y': random.randint(0, SCREEN_HEIGHT // 2),
+                    'brightness': random.uniform(0.3, 1.0),
+                    'twinkle_speed': random.uniform(0.02, 0.05)
+                })
     
-    def get_temperature_color(self, temperature):
-        """Get color based on temperature"""
-        if temperature >= 30:
-            return TEMP_HOT_COLOR
-        elif temperature >= 20:
-            return TEMP_WARM_COLOR
-        elif temperature >= 10:
-            return TEMP_MILD_COLOR
-        elif temperature >= 0:
-            return TEMP_COOL_COLOR
-        else:
-            return TEMP_COLD_COLOR
+    def is_night(self):
+        """Check if it's night time"""
+        hour = datetime.now().hour
+        return hour < 6 or hour > 18
+    
+    def update_particles(self):
+        """Update particle animations"""
+        for particle in self.particles:
+            if particle['type'] == 'rain':
+                particle['y'] += particle['speed']
+                if particle['y'] > SCREEN_HEIGHT:
+                    particle['y'] = random.randint(-50, 0)
+                    particle['x'] = random.randint(0, SCREEN_WIDTH)
+            
+            elif particle['type'] == 'snow':
+                particle['y'] += particle['speed']
+                particle['x'] += particle['drift']
+                if particle['y'] > SCREEN_HEIGHT:
+                    particle['y'] = random.randint(-50, 0)
+                    particle['x'] = random.randint(0, SCREEN_WIDTH)
+                if particle['x'] < 0 or particle['x'] > SCREEN_WIDTH:
+                    particle['x'] = random.randint(0, SCREEN_WIDTH)
+            
+            elif particle['type'] == 'star':
+                particle['brightness'] += particle['twinkle_speed']
+                if particle['brightness'] > 1.0 or particle['brightness'] < 0.3:
+                    particle['twinkle_speed'] *= -1
+    
+    def update_lightning(self):
+        """Update lightning effect"""
+        if self.current_condition == "thunderstorm":
+            self.lightning_timer += 1
+            if self.lightning_timer > 180:  # Every 3 seconds
+                if random.randint(0, 5) == 0:
+                    self.lightning_flash = 30
+                self.lightning_timer = 0
+            
+            if self.lightning_flash > 0:
+                self.lightning_flash -= 1
+    
+    def draw_gradient_background(self, screen, condition):
+        """Draw beautiful gradient background"""
+        colors = self.weather_gradients.get(condition, self.weather_gradients["clear"])
+        
+        # Create gradient effect
+        for y in range(SCREEN_HEIGHT):
+            ratio = y / SCREEN_HEIGHT
+            if ratio < 0.5:
+                # Top half gradient
+                blend_ratio = ratio * 2
+                r = int(colors[0][0] * (1 - blend_ratio) + colors[1][0] * blend_ratio)
+                g = int(colors[0][1] * (1 - blend_ratio) + colors[1][1] * blend_ratio)
+                b = int(colors[0][2] * (1 - blend_ratio) + colors[1][2] * blend_ratio)
+            else:
+                # Bottom half gradient
+                blend_ratio = (ratio - 0.5) * 2
+                r = int(colors[1][0] * (1 - blend_ratio) + colors[2][0] * blend_ratio)
+                g = int(colors[1][1] * (1 - blend_ratio) + colors[2][1] * blend_ratio)
+                b = int(colors[1][2] * (1 - blend_ratio) + colors[2][2] * blend_ratio)
+            
+            pygame.draw.line(screen, (r, g, b), (0, y), (SCREEN_WIDTH, y))
+    
+    def draw_particles(self, screen):
+        """Draw weather particles"""
+        for particle in self.particles:
+            if particle['type'] == 'rain':
+                color = (173, 216, 230)  # Light blue
+                start_pos = (int(particle['x']), int(particle['y']))
+                end_pos = (int(particle['x']), int(particle['y'] + particle['length']))
+                pygame.draw.line(screen, color, start_pos, end_pos, 2)
+            
+            elif particle['type'] == 'snow':
+                color = (255, 255, 255)
+                pygame.draw.circle(screen, color, 
+                                 (int(particle['x']), int(particle['y'])), 
+                                 particle['size'])
+            
+            elif particle['type'] == 'star':
+                brightness = int(255 * particle['brightness'])
+                color = (brightness, brightness, brightness)
+                pygame.draw.circle(screen, color, 
+                                 (int(particle['x']), int(particle['y'])), 2)
+    
+    def draw_sun(self, screen):
+        """Draw animated sun"""
+        if self.current_condition in ["sunny", "clear"] and not self.is_night():
+            sun_x = SCREEN_WIDTH - 80
+            sun_y = 60
+            
+            # Sun rays
+            for i in range(8):
+                angle = (i * 45 + self.animation_time * 2) % 360
+                ray_x = sun_x + math.cos(math.radians(angle)) * 45
+                ray_y = sun_y + math.sin(math.radians(angle)) * 45
+                ray_end_x = sun_x + math.cos(math.radians(angle)) * 55
+                ray_end_y = sun_y + math.sin(math.radians(angle)) * 55
+                pygame.draw.line(screen, (255, 215, 0), (ray_x, ray_y), (ray_end_x, ray_end_y), 3)
+            
+            # Sun circle
+            pygame.draw.circle(screen, (255, 215, 0), (sun_x, sun_y), 25)
+            pygame.draw.circle(screen, (255, 255, 0), (sun_x, sun_y), 20)
+    
+    def draw_moon(self, screen):
+        """Draw moon for night time"""
+        if self.is_night() and self.current_condition in ["clear", "partly_cloudy"]:
+            moon_x = SCREEN_WIDTH - 80
+            moon_y = 60
+            
+            # Moon
+            pygame.draw.circle(screen, (245, 245, 220), (moon_x, moon_y), 20)
+            pygame.draw.circle(screen, (220, 220, 180), (moon_x - 5, moon_y - 5), 15)
+    
+    def draw_lightning(self, screen):
+        """Draw lightning effect"""
+        if self.lightning_flash > 0:
+            # Flash effect
+            flash_alpha = int((self.lightning_flash / 30) * 100)
+            flash_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+            flash_surface.set_alpha(flash_alpha)
+            flash_surface.fill((255, 255, 255))
+            screen.blit(flash_surface, (0, 0))
+            
+            # Lightning bolt
+            if self.lightning_flash > 20:
+                bolt_x = random.randint(50, SCREEN_WIDTH - 50)
+                points = [
+                    (bolt_x, 0),
+                    (bolt_x - 10, 40),
+                    (bolt_x + 5, 80),
+                    (bolt_x - 8, 120),
+                    (bolt_x + 3, 160)
+                ]
+                pygame.draw.lines(screen, (255, 255, 100), False, points, 4)
+    
+    def draw_weather_info(self, screen):
+        """Draw main weather information"""
+        # Location
+        location_surface = self.os.font_xl.render(self.location, True, (255, 255, 255))
+        location_x = SCREEN_WIDTH // 2 - location_surface.get_width() // 2
+        screen.blit(location_surface, (location_x, 20))
+        
+        # Weather icon and condition
+        condition = self.current_condition
+        if self.is_night() and condition in ["clear", "partly_cloudy"]:
+            condition = f"night_{condition}"
+        
+        # Try to render emoji icon with fallback
+        icon = self.weather_icons.get(condition, self.weather_icons["default"])
+        try:
+            icon_surface = self.emoji_font.render(icon, True, (255, 255, 255))
+        except:
+            # Fallback to text representation
+            icon_surface = self.os.font_xl.render(condition.upper(), True, (255, 255, 255))
+        
+        icon_x = SCREEN_WIDTH // 2 - icon_surface.get_width() // 2
+        screen.blit(icon_surface, (icon_x, 60))
+        
+        # Temperature
+        temp_text = f"{self.current_temp}°"
+        temp_surface = self.os.font_xl.render(temp_text, True, (255, 255, 255))
+        temp_x = SCREEN_WIDTH // 2 - temp_surface.get_width() // 2
+        screen.blit(temp_surface, (temp_x, 110))
+        
+        # Condition description
+        desc_text = condition.replace("_", " ").title()
+        desc_surface = self.os.font_l.render(desc_text, True, (220, 220, 220))
+        desc_x = SCREEN_WIDTH // 2 - desc_surface.get_width() // 2
+        screen.blit(desc_surface, (desc_x, 160))
+        
+        # Additional info
+        info_y = 190
+        info_items = [
+            f"Feels like {self.feels_like}°",
+            f"Humidity {self.humidity}%",
+            f"Wind {self.wind_speed} km/h",
+            f"UV Index {self.uv_index}"
+        ]
+        
+        for i, info in enumerate(info_items):
+            info_surface = self.os.font_s.render(info, True, (200, 200, 200))
+            info_x = 20 + (i % 2) * 180
+            info_y_pos = info_y + (i // 2) * 20
+            screen.blit(info_surface, (info_x, info_y_pos))
     
     def handle_events(self, event):
         """Handle weather events"""
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
-                if self.mode == "add":
-                    self.mode = "view"
-                    self.location_input = ""
-                else:
-                    return "back"
-            
-            elif self.mode == "view":
-                self.handle_view_events(event)
-            
-            elif self.mode == "add":
-                self.handle_add_events(event)
+                return "back"
+            elif event.key == pygame.K_r:
+                # Test rain
+                self.current_condition = "rain"
+                self.init_particles()
+                print("✓ Switched to rain mode")
+            elif event.key == pygame.K_s:
+                # Test snow
+                self.current_condition = "snow"
+                self.init_particles()
+                print("✓ Switched to snow mode")
+            elif event.key == pygame.K_t:
+                # Test thunderstorm
+                self.current_condition = "thunderstorm"
+                self.init_particles()
+                print("✓ Switched to thunderstorm mode")
+            elif event.key == pygame.K_c:
+                # Test clear
+                self.current_condition = "clear"
+                self.init_particles()
+                print("✓ Switched to clear mode")
         
         return None
     
-    def handle_view_events(self, event):
-        """Handle view mode events"""
-        if event.key == pygame.K_UP:
-            self.selected_location = max(0, self.selected_location - 1)
-            self.scroll_offset = 0
-        
-        elif event.key == pygame.K_DOWN:
-            self.selected_location = min(len(self.locations) - 1, self.selected_location + 1)
-            self.scroll_offset = 0
-        
-        elif event.key == pygame.K_RETURN:
-            # Show detailed view with scrolling
-            self.scroll_offset = 0
-        
-        elif event.key == pygame.K_a:
-            self.mode = "add"
-            self.location_input = ""
-        
-        elif event.key == pygame.K_d:
-            if len(self.locations) > 1:
-                location = self.locations[self.selected_location]
-                self.locations.remove(location)
-                if location in self.weather_data:
-                    del self.weather_data[location]
-                self.selected_location = min(self.selected_location, len(self.locations) - 1)
-        
-        elif event.key == pygame.K_r:
-            # Refresh weather data
-            self.fetch_all_weather_data()
-        
-        elif event.key == pygame.K_u:
-            # Toggle temperature units
-            self.unit = "fahrenheit" if self.unit == "celsius" else "celsius"
-        
-        elif event.key == pygame.K_s:
-            # Scroll through detailed weather info
-            if self.locations:
-                location = self.locations[self.selected_location]
-                if location in self.weather_data:
-                    self.scroll_offset = (self.scroll_offset + 1) % 3
-    
-    def handle_add_events(self, event):
-        """Handle add mode events"""
-        if event.key == pygame.K_RETURN:
-            if self.location_input.strip():
-                location = self.location_input.strip().title()
-                if location not in self.locations:
-                    self.locations.append(location)
-                    self.fetch_weather_data(location)
-                self.mode = "view"
-                self.location_input = ""
-        
-        elif event.key == pygame.K_BACKSPACE:
-            self.location_input = self.location_input[:-1]
-        
-        else:
-            char = event.unicode
-            if char.isprintable() and len(self.location_input) < 20:
-                self.location_input += char
-    
-    def convert_temperature(self, celsius):
-        """Convert temperature based on unit setting"""
-        if self.unit == "fahrenheit":
-            return int(celsius * 9/5 + 32)
-        return celsius
-    
-    def get_unit_symbol(self):
-        """Get temperature unit symbol"""
-        return "°F" if self.unit == "fahrenheit" else "°C"
-    
     def update(self):
-        """Update weather state"""
-        # Update text cursor
-        self.text_cursor_timer += 1
-        if self.text_cursor_timer >= 30:
-            self.text_cursor_visible = not self.text_cursor_visible
-            self.text_cursor_timer = 0
+        """Update weather animations"""
+        self.animation_time += 1
+        self.update_particles()
+        self.update_lightning()
     
     def draw(self, screen):
-        """Draw weather interface"""
-        if self.mode == "add":
-            self.draw_add_mode(screen)
-        else:
-            self.draw_view_mode(screen)
-    
-    def draw_view_mode(self, screen):
-        """Draw view mode"""
-        # Header
-        header_text = f"Weather ({self.unit.title()})"
-        header_surface = self.os.font_l.render(header_text, True, ACCENT_COLOR)
-        header_x = SCREEN_WIDTH // 2 - header_surface.get_width() // 2
-        screen.blit(header_surface, (header_x, 5))
+        """Draw weather interface with animations"""
+        # Draw gradient background
+        condition = "night" if self.is_night() else self.current_condition
+        self.draw_gradient_background(screen, condition)
         
-        if not self.locations:
-            no_locations_text = "No locations added"
-            no_locations_surface = self.os.font_m.render(no_locations_text, True, ERROR_COLOR)
-            no_locations_x = SCREEN_WIDTH // 2 - no_locations_surface.get_width() // 2
-            screen.blit(no_locations_surface, (no_locations_x, 60))
-        else:
-            # Current location highlight
-            if self.selected_location < len(self.locations):
-                location = self.locations[self.selected_location]
-                
-                # Location selector
-                location_y = 30
-                for i, loc in enumerate(self.locations):
-                    loc_x = 10 + i * ((SCREEN_WIDTH - 20) // len(self.locations))
-                    loc_width = (SCREEN_WIDTH - 20) // len(self.locations)
-                    
-                    if i == self.selected_location:
-                        loc_rect = pygame.Rect(loc_x, location_y, loc_width - 5, 20)
-                        pygame.draw.rect(screen, SELECTED_COLOR, loc_rect)
-                        pygame.draw.rect(screen, ACCENT_COLOR, loc_rect, 2)
-                    
-                    loc_text = loc if len(loc) <= 8 else loc[:8] + "..."
-                    loc_surface = self.os.font_m.render(loc_text, True, TEXT_COLOR)
-                    screen.blit(loc_surface, (loc_x + 5, location_y + 2))
-                
-                # Weather display
-                if location in self.weather_data:
-                    weather = self.weather_data[location]
-                    
-                    # Main weather info
-                    main_y = 55
-                    
-                    # Weather icon and condition
-                    condition = weather.get("condition", "default")
-                    icon = self.weather_icons.get(condition, self.weather_icons["default"])
-                    condition_color = self.weather_colors.get(condition, self.weather_colors["default"])
-                    
-                    # Large weather icon
-                    icon_surface = self.os.font_xl.render(icon, True, condition_color)
-                    icon_x = 20
-                    screen.blit(icon_surface, (icon_x, main_y))
-                    
-                    # Temperature
-                    temp = self.convert_temperature(weather["temperature"])
-                    temp_text = f"{temp}{self.get_unit_symbol()}"
-                    temp_surface = self.os.font_xl.render(temp_text, True, 
-                                                        self.get_temperature_color(weather["temperature"]))
-                    temp_x = 80
-                    screen.blit(temp_surface, (temp_x, main_y))
-                    
-                    # Feels like
-                    feels_like = self.convert_temperature(weather["feels_like"])
-                    feels_text = f"Feels like {feels_like}{self.get_unit_symbol()}"
-                    feels_surface = self.os.font_s.render(feels_text, True, HIGHLIGHT_COLOR)
-                    screen.blit(feels_surface, (temp_x, main_y + 35))
-                    
-                    # Description
-                    desc_surface = self.os.font_m.render(weather["description"], True, TEXT_COLOR)
-                    screen.blit(desc_surface, (20, main_y + 55))
-                    
-                    # Detailed info (scrollable)
-                    detail_y = main_y + 80
-                    
-                    details = [
-                        ("Humidity", f"{weather['humidity']}%"),
-                        ("Wind", f"{weather['wind_speed']} km/h"),
-                        ("Pressure", f"{weather['pressure']} hPa"),
-                        ("Visibility", f"{weather['visibility']} km"),
-                        ("Updated", datetime.fromisoformat(weather['last_updated']).strftime("%H:%M"))
-                    ]
-                    
-                    # Show details based on scroll offset
-                    visible_details = details[self.scroll_offset:self.scroll_offset + 3]
-                    
-                    for i, (label, value) in enumerate(visible_details):
-                        detail_text = f"{label}: {value}"
-                        detail_surface = self.os.font_m.render(detail_text, True, TEXT_COLOR)
-                        screen.blit(detail_surface, (20, detail_y + i * 18))
-                    
-                    # Scroll indicators
-                    if self.scroll_offset > 0:
-                        up_text = "↑ More info"
-                        up_surface = self.os.font_tiny.render(up_text, True, HIGHLIGHT_COLOR)
-                        screen.blit(up_surface, (SCREEN_WIDTH - 80, detail_y - 10))
-                    
-                    if self.scroll_offset + 3 < len(details):
-                        down_text = "↓ More info"
-                        down_surface = self.os.font_tiny.render(down_text, True, HIGHLIGHT_COLOR)
-                        screen.blit(down_surface, (SCREEN_WIDTH - 80, detail_y + 50))
-                
-                else:
-                    # No data available
-                    no_data_text = "Loading weather data..."
-                    no_data_surface = self.os.font_m.render(no_data_text, True, WARNING_COLOR)
-                    no_data_x = SCREEN_WIDTH // 2 - no_data_surface.get_width() // 2
-                    screen.blit(no_data_surface, (no_data_x, 80))
+        # Draw lightning effect
+        self.draw_lightning(screen)
         
-        # Controls
-        controls = [
-            "↑↓: Navigate locations",
-            "A: Add location",
-            "D: Delete location",
-            "R: Refresh",
-            "U: Toggle units",
-            "S: Scroll details"
-        ]
+        # Draw particles (rain, snow, etc.)
+        self.draw_particles(screen)
         
-        control_y = SCREEN_HEIGHT - 50
-        for i, control in enumerate(controls):
-            control_surface = self.os.font_tiny.render(control, True, HIGHLIGHT_COLOR)
-            control_x = 10 + (i % 3) * 125
-            control_y_pos = control_y + (i // 3) * 12
-            screen.blit(control_surface, (control_x, control_y_pos))
-    
-    def draw_add_mode(self, screen):
-        """Draw add mode"""
-        # Header
-        header_text = "Add Weather Location"
-        header_surface = self.os.font_l.render(header_text, True, ACCENT_COLOR)
-        header_x = SCREEN_WIDTH // 2 - header_surface.get_width() // 2
-        screen.blit(header_surface, (header_x, 5))
+        # Draw sun or moon
+        self.draw_sun(screen)
+        self.draw_moon(screen)
         
-        # Input label
-        input_label = "Enter city name:"
-        input_surface = self.os.font_m.render(input_label, True, TEXT_COLOR)
-        screen.blit(input_surface, (10, 40))
+        # Draw weather information
+        self.draw_weather_info(screen)
         
-        # Input field
-        input_rect = pygame.Rect(10, 60, SCREEN_WIDTH - 20, 30)
-        pygame.draw.rect(screen, BUTTON_COLOR, input_rect)
-        pygame.draw.rect(screen, BUTTON_BORDER_COLOR, input_rect, 2)
-        
-        input_text = self.location_input
-        if self.text_cursor_visible:
-            input_text += "|"
-        
-        input_text_surface = self.os.font_m.render(input_text, True, TEXT_COLOR)
-        screen.blit(input_text_surface, (15, 65))
-        
-        # Instructions
-        instructions = [
-            "Enter the name of a city to add weather information.",
-            "Examples: London, Paris, Tokyo, New York",
-            "Press Enter to add, ESC to cancel."
-        ]
-        
-        instruction_y = 110
-        for instruction in instructions:
-            instruction_surface = self.os.font_s.render(instruction, True, HIGHLIGHT_COLOR)
-            instruction_x = SCREEN_WIDTH // 2 - instruction_surface.get_width() // 2
-            screen.blit(instruction_surface, (instruction_x, instruction_y))
-            instruction_y += 20
-        
-        # Current locations
-        if self.locations:
-            current_label = "Current locations:"
-            current_surface = self.os.font_m.render(current_label, True, TEXT_COLOR)
-            screen.blit(current_surface, (10, 170))
-            
-            locations_text = ", ".join(self.locations)
-            if len(locations_text) > 45:
-                locations_text = locations_text[:45] + "..."
-            
-            locations_surface = self.os.font_s.render(locations_text, True, HIGHLIGHT_COLOR)
-            screen.blit(locations_surface, (10, 190))
-        
-        # Controls
-        controls = [
-            "Type: Enter city name",
-            "Enter: Add location",
-            "ESC: Cancel"
-        ]
-        
-        control_y = SCREEN_HEIGHT - 35
-        for i, control in enumerate(controls):
-            control_surface = self.os.font_tiny.render(control, True, HIGHLIGHT_COLOR)
-            control_x = 10 + (i % 2) * 180
-            control_y_pos = control_y + (i // 2) * 12
-            screen.blit(control_surface, (control_x, control_y_pos))
+        # Controls hint
+        controls_text = "R:Rain S:Snow T:Thunder C:Clear ESC:Back"
+        controls_surface = self.os.font_tiny.render(controls_text, True, (150, 150, 150))
+        screen.blit(controls_surface, (10, SCREEN_HEIGHT - 15))
     
     def save_data(self):
         """Save weather data"""
         return {
-            "locations": self.locations,
-            "unit": self.unit,
+            "location": self.location,
             "weather_data": self.weather_data
         }
     
     def load_data(self, data):
         """Load weather data"""
-        self.locations = data.get("locations", self.locations)
-        self.unit = data.get("unit", self.unit)
-        
-        # Don't load old weather data, fetch fresh data
-        self.weather_data = {}
-        self.fetch_all_weather_data()
+        self.location = data.get("location", "Madrid")
+        self.weather_data = data.get("weather_data", {})
