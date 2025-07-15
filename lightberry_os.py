@@ -1,3 +1,4 @@
+cat lightberry_os.py
 #!/usr/bin/env python3
 """
 LightBerry OS - Complete Professional Operating System
@@ -182,8 +183,6 @@ class LightBerryOS:
             # Update activity on any event
             self.update_activity()
             
-            if self.screensaver_active:
-                continue
             
             # Handle events based on current screen
             if self.current_screen == "main_menu":
@@ -235,6 +234,9 @@ class LightBerryOS:
         if time.time() - self.last_activity > self.screensaver_timeout:
             self.screensaver_active = True
             self.screensaver_animation_time += 1
+        else:
+            # Reset screensaver if user is active
+            self.screensaver_animation_time = 0
         
         # Update current module
         if not self.screensaver_active and self.current_screen != "main_menu":
@@ -272,7 +274,7 @@ class LightBerryOS:
         
         # Draw animated circles
         for i in range(3):
-            radius = 30 + math.sin(time_factor + i * 2) * 15
+            radius = int(30 + math.sin(time_factor + i * 2) * 15)
             alpha = 100 + math.sin(time_factor + i * 1.5) * 50
             color = [int(c * (alpha / 255)) for c in ACCENT_COLOR]
             
