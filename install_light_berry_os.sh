@@ -42,31 +42,6 @@ sudo apt-get update -qq > /dev/null
 sudo apt-get install -y python3-pygame xserver-xorg xinit openbox unclutter neomutt python3-requests
 print_status "Dependencias instaladas (incluyendo neomutt para correo)."
 
-print_info "-> 2. Creando directorio de aplicación..."
-mkdir -p "$APP_DIR"
-print_status "Directorio de aplicación creado."
-
-print_info "-> 3. Copiando archivos de aplicación..."
-cp "$(dirname "$0")/lightberry_os.py" "$APP_DIR/"
-cp "$(dirname "$0")/light_phone_kiosk.py" "$APP_DIR/"
-cp "$(dirname "$0")/utils/data_manager.py" "$APP_DIR/"
-cp "$(dirname "$0")/utils/hardware_manager.py" "$APP_DIR/"
-cp "$(dirname "$0")/utils/notification_manager.py" "$APP_DIR/"
-cp "$(dirname "$0")/modules/calculator.py" "$APP_DIR/"
-cp "$(dirname "$0")/modules/calendar_module.py" "$APP_DIR/"
-cp "$(dirname "$0")/modules/converter.py" "$APP_DIR/"
-cp "$(dirname "$0")/modules/mail.py" "$APP_DIR/"
-cp "$(dirname "$0")/modules/notes.py" "$APP_DIR/"
-cp "$(dirname "$0")/modules/quit.py" "$APP_DIR/"
-cp "$(dirname "$0")/modules/settings.py" "$APP_DIR/"
-cp "$(dirname "$0")/modules/terminal.py" "$APP_DIR/"
-cp "$(dirname "$0")/modules/system_info.py" "$APP_DIR/"
-cp "$(dirname "$0")/modules/timer.py" "$APP_DIR/"
-cp "$(dirname "$0")/modules/weather.py" "$APP_DIR/"
-cp "$(dirname "$0")/modules/world_clock.py" "$APP_DIR/"
-chmod +x "$APP_DIR"/*.py
-chmod +x "$APP_DIR"/*.sh
-print_status "Archivos de aplicación copiados."
 
 print_info "-> 4. Configurando entorno gráfico..."
 
